@@ -59,6 +59,13 @@ type Router struct {
 	Token         string         // "" = no auth (matches the in-process Electron case)
 	MihomoBin     string         // absolute path to the kernel binary (for info.kernel.path)
 	MihomoVersion string         // build-time pinned tag (for info.kernel.version fallback)
+	// HomeDir is mihomo's -d working dir. Used to materialize validate
+	// candidate files alongside the live active.yaml so the validator resolves
+	// geo/cache paths the same way.
+	HomeDir string
+	// ActiveConfigPath is the file the kernel runs with -f. safeActivate runs
+	// `mihomo -t` against this path AFTER SetActive writes it.
+	ActiveConfigPath string
 }
 
 // AgentVersion is the agent version reported to the dashboard. The TS server
@@ -105,6 +112,36 @@ func New(r Router) chi.Router {
 		respondKernel(w, st, err)
 	})
 	mux.Post("/api/control/kernel/restart", func(w http.ResponseWriter, req *http.Request) {
+		st, err := r.Supervisor.Restart()
+		respondKernel(w, st, err)
+	})
+	// Restore the last-known-good active.yaml from the .bak snapshot written
+	// by SetActive, then restart. Escape hatch for a config that bricks the
+	// kernel on boot (#2109). 404 when no backup exists.
+	mux.Post("/api/control/kernel/rollback", func(w http.ResponseWriter, req *http.Request) {
+		if r.Profiles == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "profile store unavailable"})
+			return
+		}
+		if !r.Profiles.Rollback() {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no backup config to roll back to"})
+			return
+		}
+		st, err := r.Supervisor.Restart()
+		respondKernel(w, st, err)
+	})
+	// Reset active.yaml to header-only and drop activeId, then restart on
+	// mihomo defaults. Last-resort recovery when even the .bak is bad — the
+	// dashboard reconnects and the user can re-import a profile.
+	mux.Post("/api/control/kernel/recover", func(w http.ResponseWriter, req *http.Request) {
+		if r.Profiles == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "profile store unavailable"})
+			return
+		}
+		if err := r.Profiles.ResetActive(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 		st, err := r.Supervisor.Restart()
 		respondKernel(w, st, err)
 	})

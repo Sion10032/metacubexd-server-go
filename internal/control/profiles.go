@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 
@@ -179,31 +180,75 @@ func registerProfileRoutes(r chi.Router, deps *Router) {
 		writeJSON(w, http.StatusOK, kernel)
 	})
 
-	// Phase 3 will replace this with `mihomo -t -f <candidate>`. For now the
-	// route exists so the dashboard's "Validate" button doesn't 404, and
-	// reports success optimistically so activation isn't blocked.
+	// Phase 3: real validate. Materialize the profile to a candidate file
+	// (independent of active.yaml so the running kernel is untouched) and ask
+	// the supervisor to run `mihomo -t` on it. The 5min timeout tolerates a
+	// first-validate GEO download.
 	r.Post("/api/control/profiles/{id}/validate", func(w http.ResponseWriter, req *http.Request) {
-		writeJSON(w, http.StatusNotImplemented, map[string]any{
-			"valid":   false,
-			"message": "validate not implemented in this build (Phase 3)",
-		})
+		id := chi.URLParam(req, "id")
+		content, err := p.Read(id)
+		if err != nil {
+			respondProfileErr(w, err)
+			return
+		}
+		// Candidate file alongside active.yaml so the supervisor's homeDir -d
+		// argument resolves geo/cache paths the same way the live config does.
+		candidate := deps.HomeDir + "/.validate-" + id + ".yaml"
+		if err := os.WriteFile(candidate, []byte(content), 0o644); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		defer os.Remove(candidate)
+		result := deps.Supervisor.Validate(candidate)
+		writeJSON(w, http.StatusOK, result)
 	})
 }
 
-// safeActivate composes the profile into active.yaml and restarts the kernel.
-// Phase 3 will add `mihomo -t` validation + rollback-on-failure here; for now
-// the operation is: setActive → restart.
+// safeActivate composes the profile into active.yaml, validates it with
+// `mihomo -t`, and restarts the kernel only if validation passes. On failure
+// it restores the previous active config so a bad subscription can't brick
+// the running kernel across restarts (#2109):
 //
-// The previousActiveId is captured (but unused in Phase 2) so the rollback
-// path lands cleanly in Phase 3 without an API change.
+//   - If there was a different prior active profile, re-activate it (re-compose
+//	     its overlays). This is the common case (user toggles between profiles).
+//   - If there was no prior active profile (first activation) OR re-activating
+//	     the same id, restore the pre-activation file from the .bak snapshot
+//			written by SetActive.
+//
+// Either rollback path is best-effort — a failure must not mask the original
+// validation error, so we swallow rollback errors.
 func safeActivate(deps *Router, id string) (supervisor.KernelState, error) {
-	prev := deps.Profiles.GetActiveID()
-	_ = prev // Phase 3 rollback hook
+	prevID := deps.Profiles.GetActiveID()
 	if err := deps.Profiles.SetActive(id); err != nil {
 		return supervisor.KernelState{}, err
 	}
-	return deps.Supervisor.Restart()
+
+	result := deps.Supervisor.Validate(deps.ActiveConfigPath)
+	if result.Valid {
+		return deps.Supervisor.Restart()
+	}
+
+	// Validation failed: roll back to the prior good config so the running
+	// kernel doesn't pick up the bad one on next restart.
+	if prevID != "" && prevID != id {
+		_ = deps.Profiles.SetActive(prevID)
+	} else {
+		_ = deps.Profiles.Rollback()
+	}
+
+	// Surface a clean 400 carrying the validator's message. The caller maps
+	// this to the HTTP response.
+	return supervisor.KernelState{}, &ValidateError{Message: result.Message}
 }
+
+// ValidateError is surfaced by safeActivate when `mihomo -t` rejects the
+// candidate. The control layer maps it to HTTP 400 with the validator's
+// message so the dashboard can show the diagnostic.
+type ValidateError struct {
+	Message string
+}
+
+func (e *ValidateError) Error() string { return "profile validation failed" }
 
 // findMeta scans the index for one meta. We don't expose a public Get on the
 // store because list+filter is what the TS does and the index always fits in
@@ -248,6 +293,16 @@ func respondProfileErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, profile.ErrMultipleOverlays):
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	default:
+		// ValidateError is a fresh allocation per call (not a sentinel), so we
+		// use errors.As rather than errors.Is.
+		var ve *ValidateError
+		if errors.As(err, &ve) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error":   "profile validation failed",
+				"detail": ve.Message,
+			})
+			return
+		}
 		var subErr *profile.SubscriptionFetchError
 		if errors.As(err, &subErr) {
 			// Echo the provider's HTTP status verbatim — a 401 from a credentialed

@@ -51,6 +51,11 @@ func main() {
 		ExternalController: env.ExternalController(),
 		Secret:             env.ClashSecret,
 		MixedPort:          env.MixedPort,
+		// Crash watchdog: the All-in-One server is the only thing keeping the
+		// kernel up, so an unexpected crash should self-heal rather than brick
+		// the dashboard until someone clicks "Start". maxRestarts bounds a
+		// crash loop; stableRestart resets the counter once running.
+		AutoRestart: true,
 	})
 
 	// Profile store: index.json + <id>.yaml + state.json under
@@ -91,11 +96,13 @@ func main() {
 	// paths. ServeMux's subtree pattern forwards every /api/control/** request
 	// verbatim (r.URL.Path is unchanged), so chi's internal match works.
 	mux.Handle("/api/control/", control.New(control.Router{
-		Supervisor:    sup,
-		Profiles:      profiles,
-		Token:         env.ControlToken,
-		MihomoBin:     env.MihomoBin,
-		MihomoVersion: env.MihomoVersion,
+		Supervisor:       sup,
+		Profiles:         profiles,
+		Token:            env.ControlToken,
+		MihomoBin:        env.MihomoBin,
+		MihomoVersion:    env.MihomoVersion,
+		HomeDir:          env.DataDir,
+		ActiveConfigPath: env.ActiveConfigPath(),
 	}))
 
 	// Clash proxy: stateFunc reads live supervisor state so a kernel restart

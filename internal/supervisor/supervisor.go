@@ -9,7 +9,6 @@ package supervisor
 
 import (
 	"bufio"
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -79,6 +78,26 @@ type Options struct {
 	MixedPort          int // 0 = don't inject mixed-port into active.yaml
 	StartTimeout       time.Duration
 	StopTimeout        time.Duration
+
+	// ValidateTimeout caps a single `mihomo -t` run. Default 5min — mihomo
+	// synchronously downloads missing GEO data on a fresh homeDir and gives
+	// each download up to 90s; a too-tight watchdog kills every first
+	// validation that references GEOIP/fallback-filter (TS #2118, #2121).
+	ValidateTimeout time.Duration
+
+	// AutoRestart arms the crash watchdog: an unexpected proc exit (not a
+	// user Stop) is retried after RestartBackoff, up to MaxRestarts
+	// consecutive attempts. Default true.
+	AutoRestart bool
+	// MaxRestarts caps consecutive auto-restarts before the supervisor gives
+	// up and leaves status=errored. Default 3.
+	MaxRestarts int
+	// RestartBackoff is the delay before each auto-restart attempt. Default 1s.
+	RestartBackoff time.Duration
+	// StableRestart is how long the kernel must stay running before the
+	// consecutive-crash counter resets. Default 30s — a kernel that reaches
+	// running and immediately dies still counts toward MaxRestarts.
+	StableRestart time.Duration
 }
 
 // Supervisor manages one mihomo subprocess at a time. Concurrent Start/Stop/
@@ -88,10 +107,16 @@ type Supervisor struct {
 
 	binaryPath string
 
-	mu       sync.Mutex // protects state, child, callbacks, flags
+	mu       sync.Mutex // protects state, child, callbacks, flags, timers
 	state    KernelState
 	child    *childProc
 	intentionalStop bool
+
+	// Crash watchdog bookkeeping. All guarded by mu so timer callbacks can
+	// read/inspect them without racing lifecycle ops.
+	restartCount int
+	restartTimer *time.Timer
+	stableTimer  *time.Timer
 
 	logCbs   map[int]LogCallback
 	stateCbs map[int]StateCallback
@@ -125,6 +150,22 @@ func New(opts Options) *Supervisor {
 	}
 	if opts.StopTimeout == 0 {
 		opts.StopTimeout = 5 * time.Second
+	}
+	if opts.ValidateTimeout == 0 {
+		opts.ValidateTimeout = 5 * time.Minute
+	}
+	// AutoRestart is a plain bool so tests can disable the watchdog by
+	// passing false; the All-in-One server sets it true explicitly in
+	// main.go. Zero-value MaxRestarts/RestartBackoff/StableRestart get useful
+	// defaults because their zero values aren't meaningful.
+	if opts.MaxRestarts == 0 {
+		opts.MaxRestarts = 3
+	}
+	if opts.RestartBackoff == 0 {
+		opts.RestartBackoff = 1 * time.Second
+	}
+	if opts.StableRestart == 0 {
+		opts.StableRestart = 30 * time.Second
 	}
 	opts.ExternalController = ec
 	opts.Secret = secret
@@ -180,6 +221,9 @@ func (s *Supervisor) Stop() (KernelState, error) {
 
 	s.mu.Lock()
 	s.intentionalStop = true
+	s.restartCount = 0
+	s.cancelRestartTimerLocked()
+	s.cancelStabilityResetLocked()
 	c := s.child
 	if c == nil {
 		s.state.Status = StatusStopped
@@ -231,6 +275,10 @@ func (s *Supervisor) Dispose() error {
 	defer s.lifeMu.Unlock()
 	_, err := s.doStop()
 	s.mu.Lock()
+	// Tear down watchdog timers so a pending backoff can't respawn after
+	// dispose (mirrors the TS dispose).
+	s.cancelRestartTimerLocked()
+	s.cancelStabilityResetLocked()
 	s.logCbs = make(map[int]LogCallback)
 	s.stateCbs = make(map[int]StateCallback)
 	s.mu.Unlock()
@@ -364,7 +412,12 @@ func (s *Supervisor) failStart(msg string) (KernelState, error) {
 // without re-acquiring lifeMu.
 func (s *Supervisor) doStop() (KernelState, error) {
 	s.mu.Lock()
+	// Mark user-initiated so the proc 'exit' handler does not auto-restart,
+	// and cancel any pending backoff restart a prior crash may have armed.
 	s.intentionalStop = true
+	s.restartCount = 0
+	s.cancelRestartTimerLocked()
+	s.cancelStabilityResetLocked()
 	c := s.child
 	if c == nil {
 		s.state.Status = StatusStopped
@@ -397,7 +450,8 @@ func (s *Supervisor) doStop() (KernelState, error) {
 }
 
 // watchExit is the single owner of cmd.Wait(). It runs in its own goroutine
-// per spawn and updates state when the process exits.
+// per spawn and updates state when the process exits. An unexpected exit
+// (not user-initiated) arms the auto-restart watchdog.
 func (s *Supervisor) watchExit(c *childProc) {
 	_ = c.cmd.Wait()
 	var exitCode *int
@@ -409,6 +463,7 @@ func (s *Supervisor) watchExit(c *childProc) {
 		}
 	}
 
+	needRestart := false
 	s.mu.Lock()
 	// Late exit from a superseded child — ignore. (Shouldn't happen since lifeMu
 	// serializes lifecycle ops, but guard anyway.)
@@ -417,15 +472,24 @@ func (s *Supervisor) watchExit(c *childProc) {
 		close(c.done)
 		return
 	}
-	s.child = nil
+		s.child = nil
+	// This run is over: any stability timer armed for it must not fire later.
+	s.cancelStabilityResetLocked()
+
 	wasActive := s.state.Status == StatusStarting ||
 		s.state.Status == StatusRunning ||
 		s.state.Status == StatusStopping
 	if wasActive {
 		if s.intentionalStop {
+			// User-initiated stop/restart: clean transition to stopped, no retry.
 			s.state.Status = StatusStopped
 		} else {
+			// Unexpected crash: mark errored, then maybe arm the watchdog.
 			s.state.Status = StatusErrored
+			if s.opts.AutoRestart && s.restartCount < s.opts.MaxRestarts {
+				s.restartCount++
+				needRestart = true
+			}
 		}
 	} else {
 		s.state.Status = StatusStopped
@@ -436,6 +500,11 @@ func (s *Supervisor) watchExit(c *childProc) {
 	s.broadcastStateLocked(snapshot)
 	s.mu.Unlock()
 
+	// scheduleRestart sets up its own timer goroutine; doing it outside s.mu
+	// avoids holding the lock across time.AfterFunc bookkeeping.
+	if needRestart {
+		s.scheduleRestart()
+	}
 	close(c.done)
 }
 
@@ -498,6 +567,11 @@ func (s *Supervisor) pollReady(deadline time.Time) bool {
 					snapshot := s.snapshotLocked()
 					s.broadcastStateLocked(snapshot)
 					s.mu.Unlock()
+					// Reached running: arm the stability window. Only if it stays
+					// running for StableRestart do we treat it as recovered and
+					// clear the crash counter. A kernel that reaches running and
+					// dies again immediately still counts toward MaxRestarts.
+					s.armStabilityReset()
 					return true
 				}
 				_ = resp.Body.Close()
@@ -631,6 +705,203 @@ func killProcGroup(cmd *exec.Cmd, sig syscall.Signal) error {
 	return syscall.Kill(-pgid, sig)
 }
 
-// WithContext is reserved for future use (validate with context cancellation
-// in Phase 3). Kept here so the import survives.
-var _ = context.Background
+// --- auto-restart watchdog ---
+
+// scheduleRestart arms the backoff timer, then (re)spawns via doStart under
+// lifeMu when it fires. The timer is owned under s.mu so cancel can race the
+// fire safely; the actual doStart runs without holding s.mu (doStart takes it
+// briefly itself).
+func (s *Supervisor) scheduleRestart() {
+	s.mu.Lock()
+	if s.restartTimer != nil {
+		s.restartTimer.Stop()
+	}
+	s.restartTimer = time.AfterFunc(s.opts.RestartBackoff, func() {
+		s.lifeMu.Lock()
+		defer s.lifeMu.Unlock()
+		s.mu.Lock()
+		// Clear under the same lock so a concurrent doStop sees "no timer"
+		// and a subsequent scheduleRestart starts a fresh one.
+		s.restartTimer = nil
+		// Bail if the user stopped us between the fire and the lock — doStart
+		// would reset intentionalStop otherwise.
+		if s.intentionalStop {
+			s.mu.Unlock()
+			return
+		}
+		s.mu.Unlock()
+		_, _ = s.doStart()
+	})
+	s.mu.Unlock()
+}
+
+// cancelRestartTimerLocked stops the pending backoff. Caller must hold s.mu.
+func (s *Supervisor) cancelRestartTimerLocked() {
+	if s.restartTimer != nil {
+		s.restartTimer.Stop()
+		s.restartTimer = nil
+	}
+}
+
+// armStabilityReset arms the stable-window timer. When it fires (without being
+// cancelled by an exit), the consecutive-crash counter resets — a kernel that
+// reached running and stayed up for StableRestart is considered recovered.
+//
+// Only armed when AutoRestart is on; a kernel run without the watchdog doesn't
+// need stability bookkeeping.
+func (s *Supervisor) armStabilityReset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.opts.AutoRestart {
+		return
+	}
+	s.cancelStabilityResetLocked()
+	s.stableTimer = time.AfterFunc(s.opts.StableRestart, func() {
+		s.mu.Lock()
+		s.stableTimer = nil
+		if s.state.Status == StatusRunning {
+			s.restartCount = 0
+		}
+		s.mu.Unlock()
+	})
+}
+
+// cancelStabilityResetLocked stops the pending stable-window timer. Caller
+// must hold s.mu.
+func (s *Supervisor) cancelStabilityResetLocked() {
+	if s.stableTimer != nil {
+		s.stableTimer.Stop()
+		s.stableTimer = nil
+	}
+}
+
+// --- validate ---
+
+// ValidationResult mirrors the TS validate return shape: {valid, message}.
+// message is the combined stdout+stderr the validator emitted (truncated for
+// display by the caller if needed).
+type ValidationResult struct {
+	Valid   bool   `json:"valid"`
+	Message string `json:"message"`
+}
+
+// Validate runs `mihomo -t -d <homeDir> -f <configPath>` with the configured
+// ValidateTimeout. The validator's combined stdout+stderr is captured as the
+// message regardless of outcome so a failure surfaces a useful diagnostic
+// instead of just exit code != 0.
+//
+// On timeout the process is SIGKILLed and given a bounded grace window to
+// report exit; if even that elapses, we return the timeout verdict without
+// hanging the caller (mirrors the TS VALIDATE_KILL_GRACE_MS=5s path).
+//
+// Validate does NOT serialize on lifeMu — it runs the binary in `-t` test
+// mode and never affects the live kernel state. Multiple concurrent validates
+// against different candidate files are fine.
+func (s *Supervisor) Validate(configPath string) ValidationResult {
+	bin := func() string {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.binaryPath
+	}()
+
+	// Combined output buffer, written from both pipes. bytes.Buffer is
+	// concurrency-safe for our two-writer pattern only if we hold a lock; use a
+	// mutex to be safe.
+	var outMu sync.Mutex
+	var out strings.Builder
+	appendOut := func(b []byte) {
+		outMu.Lock()
+		out.Write(b)
+		outMu.Unlock()
+	}
+
+	cmd := exec.Command(bin, "-t", "-d", s.opts.HomeDir, "-f", configPath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return ValidationResult{Valid: false, Message: "stdout pipe: " + err.Error()}
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return ValidationResult{Valid: false, Message: "stderr pipe: " + err.Error()}
+	}
+	if err := cmd.Start(); err != nil {
+		return ValidationResult{Valid: false, Message: "spawn: " + err.Error()}
+	}
+
+	// Copy pipes into out, then wait for both to close. io.Copy returns once
+	// the reader hits EOF, which happens when the writer side (the process)
+	// exits — so joining these goroutines implies the process has finished
+	// writing.
+	stdoutDone := make(chan struct{})
+	stderrDone := make(chan struct{})
+	go func() { _, _ = io.Copy(&writerFunc{appendOut}, stdout); close(stdoutDone) }()
+	go func() { _, _ = io.Copy(&writerFunc{appendOut}, stderr); close(stderrDone) }()
+
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+
+	timer := time.NewTimer(s.opts.ValidateTimeout)
+	defer timer.Stop()
+
+	var timedOut bool
+	select {
+	case err := <-waitCh:
+		// Normal exit. Drain pipes so we capture any final output.
+		<-stdoutDone
+		<-stderrDone
+		if err != nil {
+			// ProcessState may be nil if Start failed earlier — but Start already
+			// returned, so we have a ProcessState. ExitCode() returns -1 for
+			// signal kills, which we surface as invalid (not a clean validate).
+			return ValidationResult{Valid: false, Message: out.String()}
+		}
+		// Exit code 0 = config valid. mihomo's validator can return 0 with
+		// warnings on stderr; the message carries them for the UI to show.
+		return ValidationResult{Valid: true, Message: out.String()}
+	case <-timer.C:
+		timedOut = true
+		// Fall through to the kill path. Set BEFORE sending the signal: a
+		// platform wrapper might emit exit synchronously, and that exit must
+		// still report timeout rather than turn SIGKILL into a verdict.
+		_ = killProcGroup(cmd, syscall.SIGKILL)
+	}
+
+	// Bounded grace window for the kill to take effect. If the proc still
+	// doesn't exit, give up and return the timeout verdict so the caller's
+	// goroutine doesn't leak.
+	grace := time.NewTimer(5 * time.Second)
+	defer grace.Stop()
+	select {
+	case <-waitCh:
+		<-stdoutDone
+		<-stderrDone
+	case <-grace.C:
+		// Process didn't exit after SIGKILL; leak it (the OS will reap when it
+		// eventually dies) and return the timeout verdict.
+	}
+
+	if timedOut {
+		msg := out.String()
+		return ValidationResult{
+			Valid:   false,
+			Message: fmt.Sprintf("validate timeout after %s\n%s", s.opts.ValidateTimeout, msg),
+		}
+	}
+	// Unreachable in practice (we only get here via the timer.C branch).
+	return ValidationResult{Valid: false, Message: out.String()}
+}
+
+// writerFunc adapts an append func into an io.Writer so io.Copy can stream
+// into our mutex-guarded buffer.
+type writerFunc struct {
+	append func([]byte)
+}
+
+func (w *writerFunc) Write(p []byte) (int, error) {
+	// Copy p so the underlying slice isn't aliased to io.Copy's reuse buffer.
+	dup := make([]byte, len(p))
+	copy(dup, p)
+	w.append(dup)
+	return len(p), nil
+}
