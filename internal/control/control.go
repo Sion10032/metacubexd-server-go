@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"metacubexd-server-go/internal/profile"
 	"metacubexd-server-go/internal/sse"
 	"metacubexd-server-go/internal/supervisor"
 )
@@ -53,10 +54,11 @@ type KernelInfo struct {
 // Router bundles the dependencies every control handler needs. main.go
 // constructs one and passes it to chi mounting.
 type Router struct {
-	Supervisor   *supervisor.Supervisor
-	Token        string // "" = no auth (matches the in-process Electron case)
-	MihomoBin    string // absolute path to the kernel binary (for info.kernel.path)
-	MihomoVersion string // build-time pinned tag (for info.kernel.version fallback)
+	Supervisor    *supervisor.Supervisor
+	Profiles      *profile.Store // nil = Phase 1 stub (no /profiles/* routes)
+	Token         string         // "" = no auth (matches the in-process Electron case)
+	MihomoBin     string         // absolute path to the kernel binary (for info.kernel.path)
+	MihomoVersion string         // build-time pinned tag (for info.kernel.version fallback)
 }
 
 // AgentVersion is the agent version reported to the dashboard. The TS server
@@ -108,11 +110,16 @@ func New(r Router) chi.Router {
 	})
 	mux.Get("/api/control/kernel/logs", r.handleKernelLogs)
 
-	// Phase 2 will replace this with the real ProfileStore; for now return an
-	// empty list so the dashboard's sidebar renders without 404 noise.
-	mux.Get("/api/control/profiles", func(w http.ResponseWriter, req *http.Request) {
-		writeJSON(w, http.StatusOK, []any{})
-	})
+	// Profile routes. When no ProfileStore is wired in, /profiles stays at
+	// the empty-list stub so the dashboard's sidebar still renders. With a
+	// store, the full Phase 2 endpoint set is registered.
+	if r.Profiles != nil {
+		registerProfileRoutes(mux, &r)
+	} else {
+		mux.Get("/api/control/profiles", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, http.StatusOK, []any{})
+		})
+	}
 	// Everything else: explicit 404 JSON so the dashboard sees a stable error
 	// shape rather than chi's HTML 404.
 	mux.NotFound(func(w http.ResponseWriter, req *http.Request) {

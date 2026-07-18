@@ -30,6 +30,7 @@ import (
 	"metacubexd-server-go/internal/clashproxy"
 	"metacubexd-server-go/internal/config"
 	"metacubexd-server-go/internal/control"
+	"metacubexd-server-go/internal/profile"
 	"metacubexd-server-go/internal/static"
 	"metacubexd-server-go/internal/supervisor"
 )
@@ -50,6 +51,15 @@ func main() {
 		ExternalController: env.ExternalController(),
 		Secret:             env.ClashSecret,
 		MixedPort:          env.MixedPort,
+	})
+
+	// Profile store: index.json + <id>.yaml + state.json under
+	// <DATA_DIR>/profiles. SetActive composes the chosen profile + its enabled
+	// merge overlays into active.yaml, which the supervisor then spawns mihomo
+	// against. Initial-state tolerates a missing dir (first run / empty volume).
+	profiles := profile.New(profile.Options{
+		Dir:              env.ProfilesDir(),
+		ActiveConfigPath: env.ActiveConfigPath(),
 	})
 
 	// Auto-start the kernel on boot, fire-and-forget. A slow or failing kernel
@@ -82,6 +92,7 @@ func main() {
 	// verbatim (r.URL.Path is unchanged), so chi's internal match works.
 	mux.Handle("/api/control/", control.New(control.Router{
 		Supervisor:    sup,
+		Profiles:      profiles,
 		Token:         env.ControlToken,
 		MihomoBin:     env.MihomoBin,
 		MihomoVersion: env.MihomoVersion,
