@@ -34,7 +34,9 @@ type ServerEnv struct {
 	MixedPort int
 
 	// DataDir holds profiles/, active.yaml, geo caches, fake-ip cache.
-	// Default /data (matches the container VOLUME).
+	// Default "data" — resolved against the server's working directory, so a
+	// bare `./metacubexd-server` invocation keeps its state local. Container
+	// deployments override with DATA_DIR=/data (the Dockerfile VOLUME).
 	DataDir string
 
 	// MihomoBin is the absolute path to the mihomo binary. Overridable so
@@ -72,7 +74,7 @@ func FromEnv() ServerEnv {
 		ControlPort:  getIntEnv("CONTROL_PORT", 29090),
 		ClashAPIPort: getIntEnv("CLASH_API_PORT", 9090),
 		MixedPort:    getIntEnv("MIXED_PORT", 7890),
-		DataDir:      getEnv("DATA_DIR", "/data"),
+		DataDir:      getEnv("DATA_DIR", "data"),
 		MihomoBin:    getEnv("MIHOMO_BIN", "/usr/local/bin/mihomo"),
 		ControlToken: os.Getenv("CONTROL_TOKEN"),
 		ClashSecret:  os.Getenv("CLASH_SECRET"),

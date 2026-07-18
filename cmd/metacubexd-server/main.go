@@ -139,7 +139,7 @@ func main() {
 	go func() {
 		log.Printf("[server] metacubexd-server listening on %s", addr)
 		log.Printf("[server]   UI_DIST     = %s", uiDistDisplay(env.UIDist))
-		log.Printf("[server]   DATA_DIR    = %s", env.DataDir)
+		log.Printf("[server]   DATA_DIR    = %s", absPathDisplay(env.DataDir))
 		log.Printf("[server]   Clash API   = %s (internal)", env.ExternalController())
 		log.Printf("[server]   Mixed port  = %d", env.MixedPort)
 		if env.ControlToken != "" {
@@ -182,6 +182,17 @@ func uiDistDisplay(uidDist string) string {
 	abs, err := filepath.Abs(uidDist)
 	if err != nil {
 		return uidDist
+	}
+	return abs
+}
+
+// absPathDisplay resolves a (possibly relative) path against the server's CWD
+// for log readability. The default DATA_DIR is "data" (relative), which would
+// be ambiguous in startup logs without this.
+func absPathDisplay(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
 	}
 	return abs
 }
