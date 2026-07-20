@@ -70,7 +70,7 @@ func (s *Scheduler) Stop() {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.timer != nil {
 		s.timer.Stop()
 		s.timer = nil

@@ -820,8 +820,12 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	// Explicit Close after Copy: on network filesystems write failures surface
+	// at close time, and a deferred Close would silently swallow them.
 	_, err = io.Copy(out, in)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
 	return err
 }
 
