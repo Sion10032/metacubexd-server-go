@@ -152,6 +152,8 @@ func New(r Router) chi.Router {
 	// store, the full Phase 2 endpoint set is registered.
 	if r.Profiles != nil {
 		registerProfileRoutes(mux, &r)
+		registerConfigRoutes(r, mux)
+		registerBackupRoutes(r, mux)
 	} else {
 		mux.Get("/api/control/profiles", func(w http.ResponseWriter, req *http.Request) {
 			writeJSON(w, http.StatusOK, []any{})

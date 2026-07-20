@@ -31,6 +31,7 @@ import (
 	"metacubexd-server-go/internal/config"
 	"metacubexd-server-go/internal/control"
 	"metacubexd-server-go/internal/profile"
+	"metacubexd-server-go/internal/scheduler"
 	"metacubexd-server-go/internal/static"
 	"metacubexd-server-go/internal/supervisor"
 )
@@ -66,6 +67,17 @@ func main() {
 		Dir:              env.ProfilesDir(),
 		ActiveConfigPath: env.ActiveConfigPath(),
 	})
+
+	// Subscription auto-update scheduler: every 60s, refresh remote profiles
+	// whose updateInterval has elapsed. When the refreshed profile IS the
+	// active base, re-compose + restart so the new subscription takes effect
+	// immediately (matches the TS server's boot-kernel.ts plugin behavior).
+	sched := scheduler.New(scheduler.Options{
+		Profiles:   profiles,
+		Supervisor: sup,
+	})
+	sched.Start()
+	log.Printf("[profiles] auto-update scheduler started (tick=60s)")
 
 	// Auto-start the kernel on boot, fire-and-forget. A slow or failing kernel
 	// must not wedge server startup; the dashboard's Start action and (Phase 3)
@@ -167,6 +179,7 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("[server] graceful shutdown failed: %v", err)
 	}
+	sched.Stop()
 	if err := sup.Dispose(); err != nil {
 		log.Printf("[server] supervisor dispose: %v", err)
 	}
