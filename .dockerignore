@@ -1,0 +1,15 @@
+# Build artifacts + test data — don't ship into the Docker context.
+data/
+*.out
+*.coverprofile
+profile.cov
+.git/
+.go/
+
+# Test binaries
+*.test
+
+# Editor
+.vscode/
+.idea/
+*.swp

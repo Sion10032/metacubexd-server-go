@@ -1,0 +1,53 @@
+# docker compose up — single command to run the All-in-One server.
+#
+# Volumes:
+#   ./data  →  persistent profiles + active.yaml + geo cache (host-mounted)
+#
+# Ports:
+#   8080  →  dashboard + control API (browser connects here only)
+#   7890  →  mixed proxy port (client traffic)
+#   9090  →  Clash API (NOT published; internal to the container)
+#
+# Rebuild to change versions or mirrors:
+#   docker compose build --build-arg MIHOMO_VERSION=v1.19.29
+#   # China users: set mirrors to speed up downloads
+#   docker compose build --build-arg GOPROXY=https://goproxy.cn,direct \
+#                        --build-arg APK_MIRROR=mirrors.ustc.edu.cn
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        METACUBEXD_VERSION: v1.270.0
+        MIHOMO_VERSION: v1.19.27
+        # All mirrors default to empty (official sources) in the Dockerfile.
+        # China users uncomment these or pass via CLI:
+        # GOPROXY: https://goproxy.cn,direct
+        # APK_MIRROR: mirrors.ustc.edu.cn
+    image: sion10032/metacubexd-server:latest
+    container_name: metacubexd-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # dashboard + control/clash API
+      - "7890:7890"   # mihomo mixed proxy
+      # 9090 intentionally NOT published — internal-only
+    volumes:
+      - ./data:/data
+    environment:
+      # All env vars have Dockerfile defaults; override here for secrets/config.
+      CONTROL_TOKEN: ""        # set to a random string to enable /api/control auth
+      CLASH_SECRET: ""         # mihomo external-controller secret
+      TZ: Asia/Shanghai
+      # Match the app user uid/gid to the host user so bind-mounted ./data
+      # is writable without the entrypoint chown-ing host files.
+      PUID: 1000
+      PGID: 1000
+      # GITHUB_TOKEN: ghp_xxx   # optional: authenticated GitHub rate limit for downloads
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/control/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
