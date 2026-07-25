@@ -19,8 +19,8 @@ func TestDefaults(t *testing.T) {
 
 	env := FromEnv()
 
-	if env.ControlPort != 29090 {
-		t.Errorf("ControlPort = %d, want 29090", env.ControlPort)
+	if env.ControlPort != 8080 {
+		t.Errorf("ControlPort = %d, want 8080", env.ControlPort)
 	}
 	if env.ClashAPIPort != 9090 {
 		t.Errorf("ClashAPIPort = %d, want 9090", env.ClashAPIPort)
@@ -100,8 +100,8 @@ func TestInvalidPortFallsBack(t *testing.T) {
 
 	env := FromEnv()
 
-	if env.ControlPort != 29090 {
-		t.Errorf("ControlPort = %d, want 29090 (fallback on invalid)", env.ControlPort)
+	if env.ControlPort != 8080 {
+		t.Errorf("ControlPort = %d, want 8080 (fallback on invalid)", env.ControlPort)
 	}
 	if env.MixedPort != 7890 {
 		t.Errorf("MixedPort = %d, want 7890 (fallback on invalid)", env.MixedPort)

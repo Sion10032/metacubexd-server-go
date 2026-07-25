@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"metacubexd-server-go/internal/auth"
 	"metacubexd-server-go/internal/profile"
 	"metacubexd-server-go/internal/sse"
 	"metacubexd-server-go/internal/supervisor"
@@ -201,6 +202,14 @@ func (r Router) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := req.URL.Path
 		if path == "/api/control/health" || path == "/api/control/info" {
+			next.ServeHTTP(w, req)
+			return
+		}
+		// Authenticated via the login cookie (same-origin dashboard after login).
+		// Short-circuits the Bearer check so a logged-in browser session works
+		// even when the request didn't carry the Bearer header (e.g. SSE
+		// EventSource, which can't set headers).
+		if auth.IsAuthed(req) {
 			next.ServeHTTP(w, req)
 			return
 		}

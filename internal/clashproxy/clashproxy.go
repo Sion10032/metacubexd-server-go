@@ -11,6 +11,7 @@ package clashproxy
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"metacubexd-server-go/internal/auth"
 )
 
 // StateFunc returns the supervisor's current view of the kernel: the upstream
@@ -70,9 +73,29 @@ func New(state StateFunc) http.Handler {
 			return
 		}
 
+		// Access control for the mihomo proxy. Two trust paths:
+		//   - authed (X-Metacubexd-Authed set by the auth middleware): a
+		//     same-origin browser that logged in via the password page. The
+		//     server is the source of truth for CLASH_SECRET and injects it.
+		//   - otherwise (cross-origin panel/API client): the caller must prove
+		//     it knows CLASH_SECRET. We check Authorization: Bearer <secret>
+		//     (HTTP) or ?token=<secret> (WS, since browsers can't set headers
+		//     on WS). A wrong/missing secret → 401 before we touch mihomo, so
+		//     the only secrets reaching mihomo are correct ones.
+		if !auth.IsAuthed(r) && !validCallerSecret(r, secret) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="clash"`)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+			return
+		}
+
 		// WS endpoints: bridge with gorilla/websocket.
 		sub := stripPrefix(r.URL.Path, "/api/clash")
 		if _, ok := wsEndpoints[sub]; ok && isWebSocketUpgrade(r) {
+			// Always inject CLASH_SECRET on the upstream dial: the access check
+			// above already established that the caller is trustworthy (either
+			// logged-in same-origin, or supplied a matching secret).
 			bridgeWS(w, r, upstreamAddr, secret, sub)
 			return
 		}
@@ -86,8 +109,15 @@ func New(state StateFunc) http.Handler {
 
 // director returns a Director that:
 //   - rewrites the request URL to point at mihomo (rewriting 0.0.0.0/:: to 127.0.0.1)
-//   - drops any client Authorization header and replaces it with the upstream secret
 //   - strips the /api/clash prefix so mihomo sees /version, /configs, ...
+//   - injects the supervisor-managed CLASH_SECRET as a Bearer header
+//
+// The access check has already happened at the mux entry (see New): either the
+// caller logged in (authed) or proved knowledge of CLASH_SECRET. Either way the
+// request is trusted to reach mihomo, and mihomo still requires its own secret
+// — so we always attach it. We drop any client-supplied Authorization first so
+// a cross-origin caller's Bearer (which equals CLASH_SECRET) isn't forwarded
+// redundantly, and a same-origin caller's stray header can't leak through.
 func director(state StateFunc) func(*http.Request) {
 	return func(r *http.Request) {
 		upstreamAddr, secret, _ := state()
@@ -121,14 +151,65 @@ func director(state StateFunc) func(*http.Request) {
 			r.URL.Path = "/"
 		}
 
-		// Replace Authorization with the supervisor-managed secret. The browser
-		// never sees this secret — it only carries the CONTROL_TOKEN for
-		// /api/control; the proxy rewrites the header here.
+		// Always inject the managed CLASH_SECRET. The browser never sees it;
+		// cross-origin callers supplied it themselves but we re-attach the
+		// canonical form so mihomo sees exactly one Bearer header.
 		r.Header.Del("Authorization")
 		if secret != "" {
 			r.Header.Set("Authorization", "Bearer "+secret)
 		}
 	}
+}
+
+// validCallerSecret reports whether a cross-origin (un-authed) caller has
+// proven knowledge of the mihomo CLASH_SECRET. Two transmission channels are
+// accepted:
+//   - Authorization: Bearer <secret>  (standard HTTP; used by API clients)
+//   - ?token=<secret>                 (query string; used by browser WS and
+//     SSE, which can't set headers)
+//
+// An empty secret (CLASH_SECRET not configured → supervisor generates a random
+// one the operator doesn't know) means cross-origin access is impossible: the
+// caller has no way to obtain the value. We return false so the request 401s
+// with a clear hint rather than succeeding by accident.
+//
+// Comparison is constant-time to resist timing attacks on the secret.
+func validCallerSecret(r *http.Request, secret string) bool {
+	if secret == "" {
+		return false
+	}
+	if presented, ok := parseBearer(r.Header.Get("Authorization")); ok {
+		if subtle.ConstantTimeCompare([]byte(presented), []byte(secret)) == 1 {
+			return true
+		}
+	}
+	if t := r.URL.Query().Get("token"); t != "" {
+		if subtle.ConstantTimeCompare([]byte(t), []byte(secret)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// parseBearer extracts the token from a "Bearer <token>" header. Scheme is
+// case-insensitive. Mirrors the auth/control variants so all three auth paths
+// agree on edge cases.
+func parseBearer(header string) (string, bool) {
+	h := strings.TrimSpace(header)
+	i := 0
+	for i < len(h) && h[i] != ' ' && h[i] != '\t' {
+		i++
+	}
+	if i == 0 || !strings.EqualFold(h[:i], "bearer") {
+		return "", false
+	}
+	for i < len(h) && (h[i] == ' ' || h[i] == '\t') {
+		i++
+	}
+	if i >= len(h) {
+		return "", false
+	}
+	return h[i:], true
 }
 
 // isWebSocketUpgrade detects a WS handshake. gorilla/websocket uses the same

@@ -71,15 +71,15 @@ type ServerEnv struct {
 // back to documented defaults; the function never returns an error.
 func FromEnv() ServerEnv {
 	return ServerEnv{
-		ControlPort:  getIntEnv("CONTROL_PORT", 29090),
-		ClashAPIPort: getIntEnv("CLASH_API_PORT", 9090),
-		MixedPort:    getIntEnv("MIXED_PORT", 7890),
-		DataDir:      getEnv("DATA_DIR", "data"),
-		MihomoBin:    getEnv("MIHOMO_BIN", "/usr/local/bin/mihomo"),
-		ControlToken: os.Getenv("CONTROL_TOKEN"),
-		ClashSecret:  os.Getenv("CLASH_SECRET"),
-		GitHubToken:  os.Getenv("GITHUB_TOKEN"),
-		UIDist:       os.Getenv("UI_DIST"),
+		ControlPort:   getIntEnv("CONTROL_PORT", 8080),
+		ClashAPIPort:  getIntEnv("CLASH_API_PORT", 9090),
+		MixedPort:     getIntEnv("MIXED_PORT", 7890),
+		DataDir:       getEnv("DATA_DIR", "data"),
+		MihomoBin:     getEnv("MIHOMO_BIN", "/usr/local/bin/mihomo"),
+		ControlToken:  os.Getenv("CONTROL_TOKEN"),
+		ClashSecret:   os.Getenv("CLASH_SECRET"),
+		GitHubToken:   os.Getenv("GITHUB_TOKEN"),
+		UIDist:        os.Getenv("UI_DIST"),
 		MihomoVersion: getEnv("MIHOMO_VERSION", "v1.19.27"),
 	}
 }

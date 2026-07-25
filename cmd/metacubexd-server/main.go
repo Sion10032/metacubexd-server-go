@@ -30,6 +30,7 @@ import (
 	"metacubexd-server-go/internal/clashproxy"
 	"metacubexd-server-go/internal/config"
 	"metacubexd-server-go/internal/control"
+	authmw "metacubexd-server-go/internal/auth"
 	"metacubexd-server-go/internal/profile"
 	"metacubexd-server-go/internal/scheduler"
 	"metacubexd-server-go/internal/static"
@@ -140,10 +141,20 @@ func main() {
 	}
 	mux.Handle("/", staticHandler)
 
+	// Auth middleware wraps the entire mux so the login flow (/login,
+	// /api/auth/*) is handled before any route, and every other path is
+	// gated when CONTROL_TOKEN is set. When CONTROL_TOKEN is empty the
+	// middleware is a no-op pass-through, preserving the unauthenticated mode.
+	//
+	// Order matters: auth must be OUTSIDE mux so /login isn't swallowed by
+	// the static SPA fallback. On success auth stamps X-Metacubexd-Authed,
+	// which clashproxy and control read to branch on credential handling.
+	handler := authmw.New(authmw.Config{Password: env.ControlToken})(mux)
+
 	addr := fmt.Sprintf(":%d", env.ControlPort)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		// No WriteTimeout — SSE + WS upgrades need to live indefinitely.
 		// ReadTimeout is bounded per-request by the underlying conn.
@@ -162,9 +173,9 @@ func main() {
 		log.Printf("[server]   Clash API   = %s (internal)", env.ExternalController())
 		log.Printf("[server]   Mixed port  = %d", env.MixedPort)
 		if env.ControlToken != "" {
-			log.Printf("[server]   control auth: enabled")
+			log.Printf("[server]   login auth:  enabled (password = CONTROL_TOKEN)")
 		} else {
-			log.Printf("[server]   control auth: DISABLED (set CONTROL_TOKEN)")
+			log.Printf("[server]   login auth:  DISABLED (set CONTROL_TOKEN to enable login page)")
 		}
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("[server] listen: %v", err)
