@@ -75,7 +75,7 @@ func FromEnv() ServerEnv {
 		ClashAPIPort:  getIntEnv("CLASH_API_PORT", 9090),
 		MixedPort:     getIntEnv("MIXED_PORT", 7890),
 		DataDir:       getEnv("DATA_DIR", "data"),
-		MihomoBin:     getEnv("MIHOMO_BIN", "/usr/local/bin/mihomo"),
+		MihomoBin:     getEnv("MIHOMO_BIN", findInPath("mihomo")),
 		ControlToken:  os.Getenv("CONTROL_TOKEN"),
 		ClashSecret:   os.Getenv("CLASH_SECRET"),
 		GitHubToken:   os.Getenv("GITHUB_TOKEN"),
@@ -103,6 +103,25 @@ func getEnv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// findInPath searches for an executable by name in PATH directories.
+// Returns the full path if found, empty string otherwise.
+func findInPath(name string) string {
+	pathEnv := os.Getenv("PATH")
+	if pathEnv == "" {
+		return ""
+	}
+	for _, dir := range strings.Split(pathEnv, string(os.PathListSeparator)) {
+		if dir == "" {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
+			return path
+		}
+	}
+	return ""
 }
 
 func getIntEnv(key string, def int) int {

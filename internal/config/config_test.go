@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 )
 
@@ -31,8 +32,10 @@ func TestDefaults(t *testing.T) {
 	if env.DataDir != "data" {
 		t.Errorf("DataDir = %q, want \"data\"", env.DataDir)
 	}
-	if env.MihomoBin != "/usr/local/bin/mihomo" {
-		t.Errorf("MihomoBin = %q, want /usr/local/bin/mihomo", env.MihomoBin)
+	if env.MihomoBin == "" {
+		// mihomo not in PATH — acceptable in CI/test environments
+	} else if _, err := os.Stat(env.MihomoBin); err != nil {
+		t.Errorf("MihomoBin = %q, but file does not exist", env.MihomoBin)
 	}
 	if env.ControlToken != "" {
 		t.Errorf("ControlToken = %q, want empty", env.ControlToken)
