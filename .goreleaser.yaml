@@ -2,6 +2,10 @@ version: 2
 
 project_name: metacubexd-server-go
 
+before:
+  hooks:
+    - bash scripts/fetch-ui.sh
+
 builds:
   - main: ./cmd/metacubexd-server
     binary: metacubexd-server-go
