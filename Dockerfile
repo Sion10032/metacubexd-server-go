@@ -18,7 +18,10 @@ COPY go.mod go.sum ./
 ARG GOPROXY=
 RUN GOPROXY=${GOPROXY} go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" \
+ARG VERSION=dev
+ARG COMMIT=none
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
     -o /out/metacubexd-server ./cmd/metacubexd-server
 
 # ─── stage 2: assemble runtime with UI + mihomo ─────────────────────────────

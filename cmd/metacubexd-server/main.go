@@ -37,7 +37,16 @@ import (
 	"metacubexd-server-go/internal/supervisor"
 )
 
+// Populated via -ldflags at build time.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
+	log.Printf("[server] metacubexd-server-go %s (commit: %s, built: %s)", version, commit, date)
+
 	env := config.FromEnv()
 
 	// Pre-create DATA_DIR/profiles so the supervisor's homeDir exists when it

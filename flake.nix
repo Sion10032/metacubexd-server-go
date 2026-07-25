@@ -24,6 +24,8 @@
             ldflags = [
               "-s" "-w"
               "-X main.version=${version}"
+              "-X main.commit=${self.rev or "none"}"
+              "-X main.date=unknown"
             ];
             postInstall = ''
               mv $out/bin/metacubexd-server $out/bin/metacubexd-server-go

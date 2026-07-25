@@ -51,6 +51,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
             METACUBEXD_VERSION=${{ github.ref_name }}
             MIHOMO_VERSION=${{ env.MIHOMO_VERSION }}
           cache-from: type=gha
