@@ -26,6 +26,7 @@ go.work.sum
 
 # env file
 .env
+.envrc.local
 
 # Editor/IDE
 # .idea/
@@ -33,3 +34,6 @@ go.work.sum
 
 /data
 /internal/static/web
+
+.direnv
+.go
