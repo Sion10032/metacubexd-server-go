@@ -16,17 +16,17 @@
 
 services:
   server:
+    image: ghcr.io/sion10032/metacubexd-server-go:latest
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        METACUBEXD_VERSION: v1.270.0
-        MIHOMO_VERSION: v1.19.27
+        METACUBEXD_VERSION: ${METACUBEXD_VERSION}
+        MIHOMO_VERSION: ${MIHOMO_VERSION}
         # All mirrors default to empty (official sources) in the Dockerfile.
         # China users uncomment these or pass via CLI:
         # GOPROXY: https://goproxy.cn,direct
         # APK_MIRROR: mirrors.ustc.edu.cn
-    image: sion10032/metacubexd-server:latest
     container_name: metacubexd-server
     restart: unless-stopped
     ports:
