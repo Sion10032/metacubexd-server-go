@@ -53,7 +53,7 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
-            METACUBEXD_VERSION=${{ github.ref_name }}
+            METACUBEXD_VERSION=${{ env.METACUBEXD_VERSION }}
             MIHOMO_VERSION=${{ env.MIHOMO_VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
