@@ -1,15 +1,25 @@
 # Build artifacts + test data — don't ship into the Docker context.
-data/
+*.test
 *.out
 *.coverprofile
 profile.cov
-.git/
+coverage.*
+
+# Local Go module cache (not needed in Docker)
 .go/
 
-# Test binaries
-*.test
+# Nix / direnv
+result
+.direnv
 
 # Editor
 .vscode/
 .idea/
-*.swp
+
+# Git (Docker daemon doesn't need this)
+.git/
+.gitignore
+
+# Project-specific
+/data
+/internal/static/web
