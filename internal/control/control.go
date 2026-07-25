@@ -21,7 +21,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"metacubexd-server-go/internal/auth"
 	"metacubexd-server-go/internal/profile"
 	"metacubexd-server-go/internal/sse"
 	"metacubexd-server-go/internal/supervisor"
@@ -93,7 +92,7 @@ var Features = []string{
 // semantics — the dashboard probes /info on boot before it has a token).
 func New(r Router) chi.Router {
 	mux := chi.NewRouter()
-	mux.Use(r.authMiddleware)
+
 	mux.Get("/api/control/health", func(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	})
@@ -193,45 +192,6 @@ func (r Router) info() Info {
 	}
 }
 
-// authMiddleware enforces the Bearer token. Empty Token = no auth required
-// (the in-process / unconfigured case). Public routes (/health, /info) skip
-// auth so the dashboard can probe capabilities before authenticating.
-//
-// SSE clients pass ?token=<value> because EventSource cannot set headers.
-func (r Router) authMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		path := req.URL.Path
-		if path == "/api/control/health" || path == "/api/control/info" {
-			next.ServeHTTP(w, req)
-			return
-		}
-		// Authenticated via the login cookie (same-origin dashboard after login).
-		// Short-circuits the Bearer check so a logged-in browser session works
-		// even when the request didn't carry the Bearer header (e.g. SSE
-		// EventSource, which can't set headers).
-		if auth.IsAuthed(req) {
-			next.ServeHTTP(w, req)
-			return
-		}
-		if r.Token == "" {
-			// No token configured: matches the TS server's "in-process" mode.
-			// The All-in-One server SHOULD set CONTROL_TOKEN in production;
-			// leaving it unset is the operator's explicit choice.
-			next.ServeHTTP(w, req)
-			return
-		}
-		if presented, ok := parseBearer(req.Header.Get("Authorization")); ok && presented == r.Token {
-			next.ServeHTTP(w, req)
-			return
-		}
-		if q := req.URL.Query().Get("token"); q != "" && q == r.Token {
-			next.ServeHTTP(w, req)
-			return
-		}
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-	})
-}
-
 // handleKernelLogs streams kernel log + state events as SSE. The handler
 // subscribes to the supervisor, seeds the current state, then blocks on the
 // request context until the client disconnects. On disconnect the deferred
@@ -326,68 +286,4 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
-}
-
-// parseBearer extracts the token from a "Bearer <token>" header. Mirrors the
-// TS parseBearer semantics: scheme is case-insensitive; the remainder (after
-// the first whitespace gap) is the token, taken verbatim — internal spaces
-// are preserved to match the upstream behavior exactly.
-func parseBearer(header string) (string, bool) {
-	h := trimASCIISpace(header)
-	i := 0
-	for i < len(h) && !isASCIISpace(h[i]) {
-		i++
-	}
-	if i == 0 || !stringsEqualFold(h[:i], "bearer") {
-		return "", false
-	}
-	for i < len(h) && isASCIISpace(h[i]) {
-		i++
-	}
-	if i >= len(h) {
-		return "", false
-	}
-	return h[i:], true
-}
-
-// trimASCIISpace / isASCIISpace / stringsEqualFold are tiny ASCII-only helpers
-// to avoid pulling in unicode for a hot auth path. The TS uses JS trim() which
-// is unicode-aware, but HTTP header grammar is ASCII so this is equivalent.
-func trimASCIISpace(s string) string {
-	start := 0
-	for start < len(s) && isASCIISpace(s[start]) {
-		start++
-	}
-	end := len(s)
-	for end > start && isASCIISpace(s[end-1]) {
-		end--
-	}
-	return s[start:end]
-}
-
-func isASCIISpace(b byte) bool {
-	switch b {
-	case ' ', '\t', '\n', '\r', '\v', '\f':
-		return true
-	}
-	return false
-}
-
-func stringsEqualFold(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := 0; i < len(a); i++ {
-		ca, cb := a[i], b[i]
-		if 'A' <= ca && ca <= 'Z' {
-			ca += 'a' - 'A'
-		}
-		if 'A' <= cb && cb <= 'Z' {
-			cb += 'a' - 'A'
-		}
-		if ca != cb {
-			return false
-		}
-	}
-	return true
 }

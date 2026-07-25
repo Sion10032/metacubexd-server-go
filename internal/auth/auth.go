@@ -1,27 +1,26 @@
-// Package auth implements optional password-based login for the All-in-One
-// server. When a password (CONTROL_TOKEN) is configured, browser access to the
-// dashboard is gated behind a lightweight login page; a signed cookie issued
-// on success lets subsequent requests (including WebSocket + SSE) pass
-// through without re-entering the password.
+// Package auth is the single source of truth for HTTP access control in the
+// All-in-One server. When a password (CONTROL_TOKEN) is configured, browser
+// access to the dashboard is gated behind a lightweight login page; a signed
+// cookie issued on success lets subsequent requests (including WebSocket +
+// SSE) pass through without re-entering the password.
 //
 // Design goals (see discussion leading to this package):
 //   - Reuse CONTROL_TOKEN as the single login password — no new env var.
 //   - Cookie carries no user info (single password), so the payload is a
 //     constant; authenticity comes from an HMAC tag keyed by the password
 //     (scheme B: password change invalidates all sessions, no extra env).
-//   - Downstream packages (clashproxy, control) detect an authenticated
-//     request via IsAuthed so they can branch:
-//       * clashproxy — inject CLASH_SECRET for authed same-origin requests,
-//         otherwise pass through the caller's own secret.
-//       * control    — skip the Bearer check for authed requests.
+//   - Two credential domains:
+//       * /api/control/*  — CONTROL_TOKEN (cookie after login, or Bearer)
+//       * /api/clash/*    — CLASH_SECRET (Bearer or ?token=) OR a valid
+//                            login cookie / CONTROL_TOKEN (same-origin
+//                            dashboard, which never learns CLASH_SECRET).
 //   - Same-origin UX: unauthenticated browser GET → 302 /login. Cross-origin
 //     (e.g. the hosted metacubexd panel, API clients) → 401, since the login
 //     page can't set a cookie the cross-origin client will send back without
 //     CORS + credentials plumbing that we deliberately avoid here.
 //
-// When Password is empty, New stamps X-Authed on every request (open mode)
-// so existing unauthenticated deployments keep working AND can still reach
-// /api/clash/* (clashproxy injects CLASH_SECRET for authed requests).
+// When Password is empty, New is a pure no-op pass-through (open mode): a
+// password-less LAN deploy is fully open, including /api/clash/*.
 package auth
 
 import (
@@ -39,11 +38,6 @@ import (
 // CookieName is the signed session cookie's name.
 const CookieName = "metacubexd_auth"
 
-// authedHeader marks a request as authenticated-by-cookie-or-Bearer so
-// downstream handlers can branch without re-parsing the cookie. It is set
-// only inside the process (never comes from the network — see stripInternal).
-const authedHeader = "X-Metacubexd-Authed"
-
 // sessionTTL bounds how long a login stays valid. 30 days mirrors typical
 // "remember me" semantics; rotating CONTROL_TOKEN invalidates immediately.
 const sessionTTL = 30 * 24 * time.Hour
@@ -59,47 +53,56 @@ const payload = "ok"
 
 // Config controls auth behavior.
 type Config struct {
-	// Password gates login. Empty = OPEN MODE: no login page, every request
-	// is trusted (X-Metacubexd-Authed is stamped unconditionally so downstream
-	// handlers like clashproxy inject CLASH_SECRET on the caller's behalf).
-	// This matches the documented "unset CONTROL_TOKEN = unauthenticated"
-	// contract: a password-less deployment is fully open, including to
-	// cross-origin clients. Set CONTROL_TOKEN to gate access.
-	// In practice this is wired from env.ControlToken.
-	Password string
+	// ControlToken gates login (CONTROL_TOKEN). Empty = OPEN MODE: no login page,
+	// every request passes through unchallenged — a password-less LAN deploy
+	// is fully open, including /api/clash/*.
+	ControlToken string
+
+	// ClashSecret is the mihomo external-controller secret (CLASH_SECRET).
+	// It authenticates cross-origin /api/clash/* clients (hosted panel, API)
+	// via Authorization: Bearer <secret> (HTTP) or ?token=<secret> (WS/SSE).
+	// Same-origin dashboard clients don't know it — they authenticate via the
+	// login cookie / Password instead. May be "" (supervisor then generates a
+	// random one the operator doesn't know); cross-origin access is impossible
+	// in that case, same-origin still works via the cookie.
+	ClashSecret string
+
+	// PublicPaths are path prefixes reachable without authentication
+	// (e.g. /api/control/health, /api/control/info for capability probing).
+	// Exact match only (no subtree semantics) — add the full path.
+	PublicPaths []string
 }
 
-// New returns an http middleware. When Password is empty it runs in OPEN
-// MODE: every request is stamped X-Authed and passed through (no login page),
-// so a password-less LAN deploy still works end-to-end. Otherwise it:
+// New returns the auth middleware.
+//
+// When Password is empty it's a pure no-op pass-through (open mode).
+// Otherwise it:
 //   - Intercepts /login, /api/auth/login, /api/auth/logout
-//   - Accepts a valid session cookie OR a Bearer token equal to Password
+//   - Lets PublicPaths through unchallenged
+//   - For /api/clash/*: accepts login-cookie OR Password-Bearer OR
+//     ClashSecret (Bearer or ?token=)
+//   - For everything else: accepts login-cookie OR Password-Bearer
 //   - Redirects same-origin browser GETs to /login when unauthenticated
 //   - Returns 401 for unauthenticated cross-origin requests
-//
-// On success it stamps authedHeader so downstream IsAuthed checks are O(1).
 func New(cfg Config) func(http.Handler) http.Handler {
-	if cfg.Password == "" {
-		// Open mode: no login page, no cookie. We still stamp X-Authed so
-		// clashproxy treats these as trusted same-origin requests and injects
-		// CLASH_SECRET on their behalf — otherwise a password-less deploy
-		// (the common LAN case) couldn't reach /api/clash/* at all, since the
-		// dashboard has no secret to present. This is consistent with
-		// /api/control/* also being open in this mode.
-		return func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r.Header.Set(authedHeader, "1")
-				next.ServeHTTP(w, r)
-			})
-		}
+	if cfg.ControlToken == "" {
+		// Open mode: no login page, no cookie, no checks. Everything is open,
+		// including /api/clash/* (clashproxy injects the managed CLASH_SECRET
+		// unconditionally). This matches the documented "unset
+		// CONTROL_TOKEN = unauthenticated" contract.
+		return func(next http.Handler) http.Handler { return next }
 	}
-	key := signingKey(cfg.Password)
-	password := cfg.Password
+	key := signingKey(cfg.ControlToken)
+	password := cfg.ControlToken
+	clashSecret := cfg.ClashSecret
+	// Index public paths for O(1) membership.
+	public := make(map[string]struct{}, len(cfg.PublicPaths))
+	for _, p := range cfg.PublicPaths {
+		public[p] = struct{}{}
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Never trust an inbound copy of our internal marker header.
-			r.Header.Del(authedHeader)
-
 			switch r.URL.Path {
 			case "/login":
 				serveLoginPage(w, r)
@@ -112,24 +115,29 @@ func New(cfg Config) func(http.Handler) http.Handler {
 				return
 			}
 
-			// /api/clash/* proxies to mihomo and authenticates with CLASH_SECRET,
-			// NOT CONTROL_TOKEN. Two reasons to special-case it here:
-			//   1. A same-origin logged-in browser sends only the cookie (no
-			//      Bearer); we stamp X-Authed so clashproxy injects CLASH_SECRET.
-			//   2. A cross-origin client (hosted panel, API) carries its own
-			//      CLASH_SECRET as a Bearer — which would fail the CONTROL_TOKEN
-			//      check below, so we must let it through to clashproxy, which
-			//      validates it directly.
-			if strings.HasPrefix(r.URL.Path, "/api/clash/") {
-				if isAuthenticated(r, key, password) {
-					r.Header.Set(authedHeader, "1")
-				}
+			// Public endpoints (capability probes) skip auth entirely.
+			if _, ok := public[r.URL.Path]; ok {
 				next.ServeHTTP(w, r)
 				return
 			}
 
+			// /api/clash/* proxies to mihomo. Two credential paths:
+			//   1. same-origin dashboard (logged in) → cookie or Password Bearer.
+			//   2. cross-origin client → CLASH_SECRET as Bearer (HTTP) or
+			//      ?token= (WS/SSE, which can't set headers).
+			if strings.HasPrefix(r.URL.Path, "/api/clash/") {
+				if isAuthenticated(r, key, password) || validClashSecret(r, clashSecret) {
+					next.ServeHTTP(w, r)
+					return
+				}
+				w.Header().Set("WWW-Authenticate", `Bearer realm="clash"`)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+				return
+			}
+
 			if isAuthenticated(r, key, password) {
-				r.Header.Set(authedHeader, "1")
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -162,15 +170,10 @@ func New(cfg Config) func(http.Handler) http.Handler {
 	}
 }
 
-// IsAuthed reports whether the request was authenticated by the auth
-// middleware (via cookie or Bearer). Downstream handlers use this to decide
-// between "server injects credentials" and "caller provides credentials".
-func IsAuthed(r *http.Request) bool {
-	return r.Header.Get(authedHeader) == "1"
-}
-
 // isAuthenticated accepts either a valid signed cookie or a Bearer token
-// equal to Password. Both checks are constant-time where it matters.
+// equal to Password (the CONTROL_TOKEN credential domain). Both checks are
+// constant-time where it matters. Used for /api/control/* and same-origin
+// /api/clash/*.
 func isAuthenticated(r *http.Request, key []byte, password string) bool {
 	if c, err := r.Cookie(CookieName); err == nil && validCookie(c.Value, key) {
 		return true
@@ -178,6 +181,33 @@ func isAuthenticated(r *http.Request, key []byte, password string) bool {
 	if presented, ok := parseBearer(r.Header.Get("Authorization")); ok {
 		// Constant-time compare against the configured password.
 		if subtle.ConstantTimeCompare([]byte(presented), []byte(password)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// validClashSecret reports whether a caller has proven knowledge of the
+// mihomo CLASH_SECRET (the clash credential domain). Two channels:
+//   - Authorization: Bearer <secret>  (standard HTTP; API clients)
+//   - ?token=<secret>                 (query string; browser WS/SSE, which
+//     can't set headers)
+//
+// Empty secret (CLASH_SECRET not configured → supervisor generates a random
+// one) means cross-origin access is impossible: the caller has no way to
+// obtain the value. Returns false so the request 401s rather than succeeding
+// by accident. Constant-time to resist timing attacks.
+func validClashSecret(r *http.Request, secret string) bool {
+	if secret == "" {
+		return false
+	}
+	if presented, ok := parseBearer(r.Header.Get("Authorization")); ok {
+		if subtle.ConstantTimeCompare([]byte(presented), []byte(secret)) == 1 {
+			return true
+		}
+	}
+	if t := r.URL.Query().Get("token"); t != "" {
+		if subtle.ConstantTimeCompare([]byte(t), []byte(secret)) == 1 {
 			return true
 		}
 	}
@@ -436,8 +466,7 @@ func extractJSONStringField(r *http.Request) string {
 }
 
 // parseBearer extracts the token from "Bearer <token>". Scheme is
-// case-insensitive. Mirrors control.parseBearer semantics so the two auth
-// paths agree on edge cases.
+// case-insensitive.
 func parseBearer(header string) (string, bool) {
 	h := strings.TrimSpace(header)
 	i := 0
@@ -508,4 +537,3 @@ func isSameOrigin(r *http.Request) bool {
 func acceptsHTML(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "text/html")
 }
-

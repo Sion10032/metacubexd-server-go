@@ -11,18 +11,15 @@ import (
 )
 
 // TestNewDisabledWhenPasswordEmpty guards the open-mode contract: when no
-// password is configured the middleware passes every request through AND
-// stamps X-Authed, so downstream handlers (clashproxy) treat them as trusted
-// and inject CLASH_SECRET on their behalf. Without the stamp, a password-less
-// LAN deploy couldn't reach /api/clash/* at all.
+// password is configured the middleware is a pure pass-through (every request
+// reaches downstream, no checks). This is the documented "unset
+// CONTROL_TOKEN = unauthenticated" contract.
 func TestNewDisabledWhenPasswordEmpty(t *testing.T) {
 	called := false
-	var sawAuthed bool
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		sawAuthed = IsAuthed(r)
 	})
-	mw := New(Config{Password: ""})(next)
+	mw := New(Config{ControlToken: ""})(next)
 
 	req := httptest.NewRequest("GET", "/anything", nil)
 	w := httptest.NewRecorder()
@@ -34,16 +31,13 @@ func TestNewDisabledWhenPasswordEmpty(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200 (pass-through)", w.Code)
 	}
-	if !sawAuthed {
-		t.Error("open mode did not stamp X-Authed; /api/clash/* would 401 in a password-less deploy")
-	}
 }
 
 // TestLoginSuccessForm exercises the form-post flow: POST the password,
 // expect a 200 JSON response with {ok:true, redirect:"/"} plus a Set-Cookie
 // for the session. The login page's <script> consumes this shape.
 func TestLoginSuccessForm(t *testing.T) {
-	mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := New(Config{ControlToken: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream should not be hit during login")
 	}))
 
@@ -90,7 +84,7 @@ func TestLoginSuccessForm(t *testing.T) {
 
 // TestLoginWrongPassword verifies a bad password yields 401 and no cookie.
 func TestLoginWrongPassword(t *testing.T) {
-	mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := New(Config{ControlToken: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream should not be hit")
 	}))
 
@@ -111,7 +105,7 @@ func TestLoginWrongPassword(t *testing.T) {
 
 // TestLoginJSON verifies the JSON API path accepts {"password":"..."}.
 func TestLoginJSON(t *testing.T) {
-	mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := New(Config{ControlToken: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream should not be hit")
 	}))
 
@@ -129,14 +123,11 @@ func TestLoginJSON(t *testing.T) {
 }
 
 // TestCookieAuth: log in, then use the issued cookie to reach a downstream
-// handler. The handler must run AND see the X-Metacubexd-Authed marker.
+// handler. The handler must run.
 func TestCookieAuth(t *testing.T) {
 	called := false
-	mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := New(Config{ControlToken: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		if !IsAuthed(r) {
-			t.Error("IsAuthed false inside downstream after cookie auth")
-		}
 	}))
 
 	// Step 1: log in to get the cookie.
@@ -155,7 +146,7 @@ func TestCookieAuth(t *testing.T) {
 	}
 
 	// Step 2: use the cookie on a real path. /api/control/* is gated by
-	// CONTROL_TOKEN, so a valid cookie must let it through AND set the marker.
+	// CONTROL_TOKEN, so a valid cookie must let it through.
 	req2 := httptest.NewRequest("GET", "/api/control/kernel/status", nil)
 	req2.AddCookie(&http.Cookie{Name: CookieName, Value: session})
 	w2 := httptest.NewRecorder()
@@ -173,7 +164,7 @@ func TestCookieAuth(t *testing.T) {
 // a cookie. This is the cross-origin API/panel-client path.
 func TestBearerAuth(t *testing.T) {
 	called := false
-	mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := New(Config{ControlToken: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 	}))
 
@@ -191,7 +182,7 @@ func TestBearerAuth(t *testing.T) {
 // (Accept: text/html) without a cookie should 302 to /login (the smooth
 // UX path) and stash the destination in metacubexd_next.
 func TestUnauthedSameOriginGETRedirects(t *testing.T) {
-	mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := New(Config{ControlToken: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream should not be hit")
 	}))
 
@@ -226,7 +217,7 @@ func TestUnauthedSameOriginGETRedirects(t *testing.T) {
 // user would be sent to /favicon.ico after login. Verify favicon gets 401
 // (not a redirect) and does NOT set the next cookie.
 func TestFaviconDoesNotStealNextPath(t *testing.T) {
-	mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := New(Config{ControlToken: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream should not be hit")
 	}))
 
@@ -248,7 +239,7 @@ func TestFaviconDoesNotStealNextPath(t *testing.T) {
 // TestUnauthedCrossOriginReturns401: a cross-origin request (different Host
 // in Origin) without credentials should get 401, not a redirect.
 func TestUnauthedCrossOriginReturns401(t *testing.T) {
-	mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := New(Config{ControlToken: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream should not be hit")
 	}))
 
@@ -266,7 +257,7 @@ func TestUnauthedCrossOriginReturns401(t *testing.T) {
 // TestLoginRoutesBypassAuth: /login, /api/auth/login, /api/auth/logout must be
 // reachable WITHOUT a cookie — otherwise users could never log in.
 func TestLoginRoutesBypassAuth(t *testing.T) {
-	mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := New(Config{ControlToken: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream should not be hit for login routes")
 	}))
 
@@ -357,7 +348,7 @@ func hexNibble(n byte) byte {
 // dynamic behavior is client-side — so we only assert the page contains the
 // elements the <script> relies on.
 func TestLoginPageRenders(t *testing.T) {
-	mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mw := New(Config{ControlToken: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream should not be hit")
 	}))
 
@@ -384,84 +375,96 @@ func TestLoginPageRenders(t *testing.T) {
 	}
 }
 
-// TestInboundAuthedHeaderStripped: an attacker sending X-Metacubexd-Authed
-// from the outside must NOT bypass auth. The middleware must delete it.
-func TestInboundAuthedHeaderStripped(t *testing.T) {
-	called := false
-	mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
+// TestClashAccessControl verifies /api/clash/* accepts three credential
+// paths and rejects the rest.
+func TestClashAccessControl(t *testing.T) {
+	mw := New(Config{
+		ControlToken:    "s3cret",
+		ClashSecret: "clashpw",
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("GET", "/api/control/kernel/status", nil)
-	req.Header.Set("X-Metacubexd-Authed", "1") // spoofed
-	w := httptest.NewRecorder()
-	mw.ServeHTTP(w, req)
+	// Helper to run one request and check the status.
+	run := func(name string, req *http.Request, want int) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mw.ServeHTTP(w, req)
+		if w.Code != want {
+			t.Errorf("%s: status = %d, want %d", name, w.Code, want)
+		}
+	}
 
-	if called {
-		t.Fatal("spoofed X-Metacubexd-Authed bypassed auth")
+	// Log in to get a session cookie for the cookie test.
+	loginReq := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader("password=s3cret"))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginW := httptest.NewRecorder()
+	mw.ServeHTTP(loginW, loginReq)
+	var session string
+	for _, c := range loginW.Result().Cookies() {
+		if c.Name == CookieName {
+			session = c.Value
+		}
 	}
-	// Same-origin unauthenticated GET redirects to /login; cross-origin or
-	// non-GET would 401. Either way, NOT 200 (downstream must not run).
-	if w.Code == http.StatusOK {
-		t.Errorf("status = 200; downstream ran with spoofed header")
+	if session == "" {
+		t.Fatal("no session cookie issued")
 	}
+
+	// 1. Valid login cookie → 200 (same-origin dashboard path).
+	cookieReq := httptest.NewRequest("GET", "/api/clash/version", nil)
+	cookieReq.AddCookie(&http.Cookie{Name: CookieName, Value: session})
+	run("cookie", cookieReq, http.StatusOK)
+
+	// 2. CLASH_SECRET as Bearer → 200 (cross-origin HTTP API path).
+	bearerReq := httptest.NewRequest("GET", "/api/clash/version", nil)
+	bearerReq.Header.Set("Authorization", "Bearer clashpw")
+	run("bearer=clashpw", bearerReq, http.StatusOK)
+
+	// 3. CLASH_SECRET as ?token= → 200 (WS/SSE path, can't set headers).
+	tokenReq := httptest.NewRequest("GET", "/api/clash/traffic?token=clashpw", nil)
+	run("?token=clashpw", tokenReq, http.StatusOK)
+
+	// 4. Wrong CLASH_SECRET, no cookie → 401.
+	wrongReq := httptest.NewRequest("GET", "/api/clash/version", nil)
+	wrongReq.Header.Set("Authorization", "Bearer wrong")
+	run("wrong secret", wrongReq, http.StatusUnauthorized)
+
+	// 5. No credentials at all → 401.
+	noneReq := httptest.NewRequest("GET", "/api/clash/version", nil)
+	run("no credentials", noneReq, http.StatusUnauthorized)
 }
 
-// TestClashPathBypassesControlAuth: /api/clash/* authenticates with
-// CLASH_SECRET (handled by clashproxy), NOT with CONTROL_TOKEN. The auth
-// middleware must let these requests through to clashproxy even when the
-// caller carries no CONTROL_TOKEN cookie/Bearer — otherwise cross-origin
-// panel clients (which only know CLASH_SECRET) could never reach the proxy.
-//
-// We verify:
-//   1. An unauthenticated /api/clash/* request reaches downstream (no 401,
-//      no redirect). clashproxy will then do its own CLASH_SECRET check.
-//   2. A same-origin request with a valid cookie still gets the X-Authed
-//      marker set, so clashproxy knows to inject CLASH_SECRET rather than
-//      demand it from the caller.
-func TestClashPathBypassesControlAuth(t *testing.T) {
-	t.Run("unauthenticated clash request reaches downstream", func(t *testing.T) {
-		hit := false
-		mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			hit = true
-			if IsAuthed(r) {
-				t.Error("IsAuthed should be false for an unauthenticated clash request")
-			}
-		}))
+// TestPublicPathsBypassAuth: PublicPaths are reachable without any
+// credentials (capability probes like /api/control/health).
+func TestPublicPathsBypassAuth(t *testing.T) {
+	called := false
+	mw := New(Config{
+		ControlToken:    "s3cret",
+		PublicPaths: []string{"/api/control/health", "/api/control/info"},
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
 
-		req := httptest.NewRequest("GET", "/api/clash/version", nil)
+	for _, p := range []string{"/api/control/health", "/api/control/info"} {
+		called = false
+		req := httptest.NewRequest("GET", p, nil)
 		w := httptest.NewRecorder()
 		mw.ServeHTTP(w, req)
-
-		if !hit {
-			t.Fatal("downstream not reached; /api/clash/* must bypass CONTROL_TOKEN auth")
+		if !called {
+			t.Errorf("%s was not let through PublicPaths", p)
 		}
-	})
+	}
 
-	t.Run("authenticated clash request keeps X-Authed marker", func(t *testing.T) {
-		// Log in first to obtain a cookie.
-		mw := New(Config{Password: "s3cret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !IsAuthed(r) {
-				t.Error("IsAuthed false for authenticated clash request")
-			}
-		}))
-		req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader("password=s3cret"))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		w := httptest.NewRecorder()
-		mw.ServeHTTP(w, req)
-		var session string
-		for _, c := range w.Result().Cookies() {
-			if c.Name == CookieName {
-				session = c.Value
-			}
-		}
-		if session == "" {
-			t.Fatal("no session cookie issued")
-		}
-
-		req2 := httptest.NewRequest("GET", "/api/clash/version", nil)
-		req2.AddCookie(&http.Cookie{Name: CookieName, Value: session})
-		w2 := httptest.NewRecorder()
-		mw.ServeHTTP(w2, req2)
-	})
+	// A non-public control path without credentials must still be rejected.
+	called = false
+	req := httptest.NewRequest("GET", "/api/control/kernel/status", nil)
+	w := httptest.NewRecorder()
+	mw.ServeHTTP(w, req)
+	if called {
+		t.Error("non-public path was let through without credentials")
+	}
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("non-public path: status = %d, want 401", w.Code)
+	}
 }

@@ -83,7 +83,6 @@ func TestHTTPProxyVersion(t *testing.T) {
 	})
 
 	req := httptest.NewRequest("GET", "/api/clash/version", nil)
-	req.Header.Set("X-Metacubexd-Authed", "1") // same-origin post-login
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -107,7 +106,6 @@ func TestHTTPProxyConfigs(t *testing.T) {
 	})
 
 	req := httptest.NewRequest("GET", "/api/clash/configs", nil)
-	req.Header.Set("X-Metacubexd-Authed", "1") // same-origin post-login
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -126,7 +124,6 @@ func TestHTTPProxyTraffic(t *testing.T) {
 	})
 
 	req := httptest.NewRequest("GET", "/api/clash/traffic", nil)
-	req.Header.Set("X-Metacubexd-Authed", "1") // same-origin post-login
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -200,9 +197,7 @@ func TestWSBridgeTraffic(t *testing.T) {
 
 	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/api/clash/traffic"
 	dialer := websocket.Dialer{}
-	// X-Metacubexd-Authed mimics the same-origin post-login marker that the
-	// auth middleware would set, so the proxy injects CLASH_SECRET for us.
-	conn, resp, err := dialer.Dial(wsURL, http.Header{"X-Metacubexd-Authed": []string{"1"}})
+	conn, resp, err := dialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("WS dial: %v (resp=%v)", err, resp)
 	}
@@ -238,77 +233,40 @@ func TestStripPrefix(t *testing.T) {
 	}
 }
 
-// TestHTTPProxySecretBranch covers the access-control rules introduced when
-// /api/clash/* was gated by CLASH_SECRET:
-//   - authed request (same-origin post-login) → server injects CLASH_SECRET,
-//     any client Authorization is dropped. The browser never sees the secret.
-//   - unauthed request with correct CLASH_SECRET → 401 bypassed; mihomo still
-//     sees exactly one Bearer = CLASH_SECRET (re-attached by the proxy).
-//   - unauthed with wrong/absent secret → 401 at the proxy, never reaches
-//     mihomo. Same for the CLASH_SECRET-not-configured case.
+// TestHTTPProxyInjectsManagedSecret verifies clashproxy injects the managed
+// CLASH_SECRET on every request and drops any client-supplied Authorization.
 //
-// The mock records the Authorization header it received so we can assert.
-func TestHTTPProxySecretBranch(t *testing.T) {
+// The mock records the Authorization header it received so we can assert
+// the managed secret is attached verbatim.
+func TestHTTPProxyInjectsManagedSecret(t *testing.T) {
 	type testcase struct {
 		name         string
-		authed       bool
 		managedEmpty bool // state returns empty secret (CLASH_SECRET not configured)
 		clientAuth   string
-		wantStatus   int
 		wantAuth     string // Authorization the upstream should observe
 	}
 	cases := []testcase{
 		{
-			name:       "authed injects managed secret, client header dropped",
-			authed:     true,
-			clientAuth: "Bearer should-be-dropped",
-			wantStatus: http.StatusOK,
+			name:       "client Authorization dropped, managed secret injected",
+			clientAuth: "Bearer caller-supplied",
 			wantAuth:   "Bearer test-secret",
 		},
 		{
-			name:       "unauthed with correct CLASH_SECRET reaches mihomo",
-			authed:     false,
-			clientAuth: "Bearer test-secret",
-			wantStatus: http.StatusOK,
-			wantAuth:   "Bearer test-secret",
-		},
-		{
-			name:       "unauthed with wrong secret is rejected",
-			authed:     false,
-			clientAuth: "Bearer wrong-secret",
-			wantStatus: http.StatusUnauthorized,
-			wantAuth:   "<no request>",
-		},
-		{
-			name:       "unauthed with no secret is rejected",
-			authed:     false,
+			name:       "no client Authorization, managed secret injected",
 			clientAuth: "",
-			wantStatus: http.StatusUnauthorized,
-			wantAuth:   "<no request>",
+			wantAuth:   "Bearer test-secret",
 		},
 		{
-			name:         "CLASH_SECRET unset rejects cross-origin (no way to know it)",
-			authed:       false,
+			name:         "empty managed secret → no Authorization forwarded",
 			managedEmpty: true,
-			clientAuth:   "Bearer anything",
-			wantStatus:   http.StatusUnauthorized,
-			wantAuth:     "<no request>",
-		},
-		{
-			name:         "authed with empty managed secret clears client header",
-			authed:       true,
-			managedEmpty: true,
-			clientAuth:   "Bearer should-be-dropped",
-			wantStatus:   http.StatusOK,
+			clientAuth:   "Bearer caller-supplied",
 			wantAuth:     "",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var observedAuth string
-			var upstreamHit bool
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				upstreamHit = true
 				observedAuth = r.Header.Get("Authorization")
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
@@ -329,21 +287,11 @@ func TestHTTPProxySecretBranch(t *testing.T) {
 			if tc.clientAuth != "" {
 				req.Header.Set("Authorization", tc.clientAuth)
 			}
-			if tc.authed {
-				req.Header.Set("X-Metacubexd-Authed", "1")
-			}
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, req)
 
-			if w.Code != tc.wantStatus {
-				t.Fatalf("status = %d, want %d", w.Code, tc.wantStatus)
-			}
-			// For 401 cases, the upstream must NOT have been hit.
-			if tc.wantStatus == http.StatusUnauthorized {
-				if upstreamHit {
-					t.Error("upstream was hit despite 401 (secret leaked to mihomo)")
-				}
-				return
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (clashproxy must forward every request)", w.Code)
 			}
 			if observedAuth != tc.wantAuth {
 				t.Errorf("upstream Authorization = %q, want %q", observedAuth, tc.wantAuth)
@@ -353,12 +301,8 @@ func TestHTTPProxySecretBranch(t *testing.T) {
 }
 
 // TestOpenModeAuthMiddlewareLetsClashThrough: in a password-less deploy
-// (CONTROL_TOKEN unset), the auth middleware stamps X-Authed on every request,
-// so clashproxy treats same-origin dashboard requests as trusted and injects
-// CLASH_SECRET for them. This is the regression guard for the bug where a
-// LAN deploy with no CONTROL_TOKEN couldn't reach /api/clash/* at all
-// (the middleware was a pure no-op, so IsAuthed was always false, so
-// validCallerSecret rejected requests that carried no secret).
+// (CONTROL_TOKEN unset), the auth middleware is a pass-through, so requests
+// reach clashproxy, which injects the managed CLASH_SECRET.
 func TestOpenModeAuthMiddlewareLetsClashThrough(t *testing.T) {
 	var observedAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -376,7 +320,7 @@ func TestOpenModeAuthMiddlewareLetsClashThrough(t *testing.T) {
 
 	// Compose the full chain exactly like main.go does: auth(mux). The auth
 	// middleware here is built with an empty password = open mode.
-	chain := authmw.New(authmw.Config{Password: ""})(clashHandler)
+	chain := authmw.New(authmw.Config{ControlToken: ""})(clashHandler)
 
 	// A same-origin dashboard fetch: no cookie, no Authorization, no ?token=.
 	// In open mode this must still reach mihomo with the managed secret.
