@@ -17,7 +17,9 @@ WORKDIR /src
 COPY go.mod go.sum ./
 ARG GOPROXY=
 RUN GOPROXY=${GOPROXY} go mod download
-COPY . .
+COPY cmd ./cmd
+COPY internal ./internal
+COPY *.go ./
 ARG VERSION=dev
 ARG COMMIT=none
 RUN CGO_ENABLED=0 go build -trimpath \
@@ -57,7 +59,7 @@ ARG APK_MIRROR=
 RUN if [ -n "$APK_MIRROR" ]; then \
         sed -i "s/dl-cdn.alpinelinux.org/$APK_MIRROR/g" /etc/apk/repositories; \
     fi && \
-    apk add --no-cache tzdata ca-certificates su-exec
+    apk add --no-cache tzdata ca-certificates util-linux
 
 COPY --from=build /out/metacubexd-server /app/metacubexd-server
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh

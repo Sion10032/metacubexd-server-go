@@ -45,6 +45,10 @@ services:
       PUID: 1000
       PGID: 1000
       # GITHUB_TOKEN: ghp_xxx   # optional: authenticated GitHub rate limit for downloads
+    # cap_add:
+    #   - NET_ADMIN
+    # devices:
+    #   - /dev/net/tun
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/control/health"]
       interval: 10s
