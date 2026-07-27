@@ -1,0 +1,48 @@
+# docker compose -f docker-compose.development.yml up
+#
+# Builds from local source and runs with debug-friendly settings.
+# Uses a separate data directory (./data-dev) to avoid polluting production data.
+#
+# Build args (override via CLI or .env):
+#   docker compose -f docker-compose.development.yml \
+#     build --build-arg MIHOMO_VERSION=v1.19.29
+#
+# Host networking:
+#   Enabled by default — binds directly to host interfaces, no port mapping.
+#   Required for TUN mode to work reliably; also lets mihomo reach host
+#   services (local DNS, WireGuard, etc.).
+#   Not supported on Docker Desktop for macOS/Windows.
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        METACUBEXD_VERSION: ${METACUBEXD_VERSION}
+        MIHOMO_VERSION: ${MIHOMO_VERSION}
+    container_name: metacubexd-server-dev
+    restart: unless-stopped
+    # ── Host networking (default for development) ───────────────────
+    # Server binds :8080/:7890/:9090 directly on the host.
+    # Comment this out and uncomment the ports block below if you need
+    # port isolation or are running on Docker Desktop.
+    network_mode: host
+    # ── Port mapping (alternative when host networking unavailable) ─
+    # Uncomment when network_mode: host is commented out.
+    # ports:
+    #   - "8080:8080"   # dashboard + control/clash API
+    #   - "7890:7890"   # mihomo mixed proxy
+    #   - "9090:9090"   # mihomo Clash API (direct access for debugging)
+    volumes:
+      - ./data-dev:/data
+    environment:
+      CONTROL_TOKEN: "dev-token"
+      CLASH_SECRET: "dev-secret"
+      TZ: Asia/Shanghai
+      PUID: 1000
+      PGID: 1000
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun

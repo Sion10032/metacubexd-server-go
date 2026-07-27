@@ -1,50 +1,45 @@
-# docker compose up — single command to run the All-in-One server.
+# docker compose up — run the All-in-One server from a pre-built image.
 #
-# Volumes:
-#   ./data  →  persistent profiles + active.yaml + geo cache (host-mounted)
+# Quick start:
+#   docker compose up -d
 #
-# Ports:
-#   8080  →  dashboard + control API (browser connects here only)
-#   7890  →  mixed proxy port (client traffic)
-#   9090  →  Clash API (NOT published; internal to the container)
+# TUN mode:
+#   Uncomment cap_add + devices below, or switch to network_mode: host.
 #
-# Rebuild to change versions or mirrors:
-#   docker compose build --build-arg MIHOMO_VERSION=v1.19.29
-#   # China users: set mirrors to speed up downloads
-#   docker compose build --build-arg GOPROXY=https://goproxy.cn,direct \
-#                        --build-arg APK_MIRROR=mirrors.ustc.edu.cn
+# Host networking (alternative to port mapping):
+#   Uncomment network_mode: host below. The server binds directly to host
+#   interfaces — no port mapping needed, and mihomo can reach host services.
+#   Note: port conflicts are your responsibility; Docker Desktop on
+#   macOS/Windows does not support host networking.
 
 services:
   server:
     image: ghcr.io/sion10032/metacubexd-server-go:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        METACUBEXD_VERSION: ${METACUBEXD_VERSION}
-        MIHOMO_VERSION: ${MIHOMO_VERSION}
-        # All mirrors default to empty (official sources) in the Dockerfile.
-        # China users uncomment these or pass via CLI:
-        # GOPROXY: https://goproxy.cn,direct
-        # APK_MIRROR: mirrors.ustc.edu.cn
     container_name: metacubexd-server
     restart: unless-stopped
+    # ── Port mapping (default) ──────────────────────────────────────
     ports:
       - "8080:8080"   # dashboard + control/clash API
       - "7890:7890"   # mihomo mixed proxy
       # 9090 intentionally NOT published — internal-only
+    # ── Host networking (alternative) ───────────────────────────────
+    # When enabled, ports above are ignored; the server binds :8080/:7890
+    # directly on the host. Useful for TUN mode or when the server needs
+    # to reach services on the host network (e.g. local DNS, WireGuard).
+    # Not supported on Docker Desktop for macOS/Windows.
+    # network_mode: host
     volumes:
       - ./data:/data
     environment:
-      # All env vars have Dockerfile defaults; override here for secrets/config.
-      CONTROL_TOKEN: ""        # set to a random string to enable /api/control auth
-      CLASH_SECRET: ""         # mihomo external-controller secret
+      # All env vars have Dockerfile defaults; override here for secrets.
+      CONTROL_TOKEN: ""        # set to a random string to enable login auth
+      CLASH_SECRET: ""         # mihomo external-controller secret (auto-generated if empty)
       TZ: Asia/Shanghai
-      # Match the app user uid/gid to the host user so bind-mounted ./data
-      # is writable without the entrypoint chown-ing host files.
+      # Match host user uid/gid so bind-mounted ./data is writable.
       PUID: 1000
       PGID: 1000
       # GITHUB_TOKEN: ghp_xxx   # optional: authenticated GitHub rate limit for downloads
+    # TUN mode — uncomment to enable mihomo TUN:
     # cap_add:
     #   - NET_ADMIN
     # devices:
