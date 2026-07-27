@@ -1,0 +1,48 @@
+#!/sbin/openrc-run
+# metacubexd-server OpenRC init script
+# https://github.com/Sion10032/metacubexd-server-go
+
+description="metacubexd-server (All-in-One dashboard + mihomo supervisor)"
+
+# ── Defaults (override via /etc/conf.d/metacubexd) ────────────────────────
+: "${MIHOMO_BIN:=/usr/local/bin/mihomo}"
+: "${DATA_DIR:=/var/lib/metacubexd}"
+: "${METACUBEXD_USER:=metacubexd:metacubexd}"
+
+command="/usr/local/bin/metacubexd-server"
+command_user="${METACUBEXD_USER}"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+command_args=""
+
+# Logging
+output_log="/var/log/${RC_SVCNAME}/${RC_SVCNAME}.log"
+error_log="/var/log/${RC_SVCNAME}/${RC_SVCNAME}.log"
+supervisor="supervise-daemon"
+supervise_daemon_args="--pidfile ${pidfile} --stdout ${output_log} --stderr ${error_log}"
+
+# ── Dependencies ──────────────────────────────────────────────────────────
+depend() {
+    need net
+    after firewall
+}
+
+# ── Pre-start: directories + TUN capability ───────────────────────────────
+start_pre() {
+    # Create log directory
+    checkpath -d -o "${METACUBEXD_USER}" -m 0755 /var/log/${RC_SVCNAME}
+
+    # Create data directory
+    local _user _group
+    _user="${METACUBEXD_USER%%:*}"
+    _group="${METACUBEXD_USER##*:}"
+    [ "${_group}" = "${_user}" ] && _group="${_user}"
+    checkpath -d -o "${_user}" -m 0755 "${DATA_DIR}"
+
+    # Grant mihomo CAP_NET_ADMIN so the child process can create TUN devices.
+    # This is idempotent; failures are non-fatal (TUN will be unavailable).
+    if [ -x "${MIHOMO_BIN}" ]; then
+        setcap cap_net_admin+ep "${MIHOMO_BIN}" 2>/dev/null || \
+            ewarn "setcap failed on ${MIHOMO_BIN}; TUN mode may be unavailable"
+    fi
+}

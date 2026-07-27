@@ -26,8 +26,8 @@ func TestDefaults(t *testing.T) {
 	if env.ClashAPIPort != 9090 {
 		t.Errorf("ClashAPIPort = %d, want 9090", env.ClashAPIPort)
 	}
-	if env.MixedPort != 7890 {
-		t.Errorf("MixedPort = %d, want 7890", env.MixedPort)
+	if env.MixedPort != 0 {
+		t.Errorf("MixedPort = %d, want 0 (default: not set)", env.MixedPort)
 	}
 	if env.DataDir != "data" {
 		t.Errorf("DataDir = %q, want \"data\"", env.DataDir)
@@ -106,8 +106,8 @@ func TestInvalidPortFallsBack(t *testing.T) {
 	if env.ControlPort != 8080 {
 		t.Errorf("ControlPort = %d, want 8080 (fallback on invalid)", env.ControlPort)
 	}
-	if env.MixedPort != 7890 {
-		t.Errorf("MixedPort = %d, want 7890 (fallback on invalid)", env.MixedPort)
+	if env.MixedPort != 0 {
+		t.Errorf("MixedPort = %d, want 0 (fallback on invalid)", env.MixedPort)
 	}
 }
 

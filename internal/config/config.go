@@ -29,8 +29,10 @@ type ServerEnv struct {
 	// same-origin proxy upstream.
 	ClashAPIPort int
 
-	// MixedPort is mihomo's mixed proxy port (default 7890). Still needs to
-	// be published to the host for client traffic.
+	// MixedPort is mihomo's mixed proxy port. When set to a non-zero value
+	// via MIXED_PORT env, the supervisor injects and locks it in active.yaml.
+	// When 0 (default), the supervisor does not touch mixed-port, allowing
+	// the metacubexd dashboard to edit and persist it.
 	MixedPort int
 
 	// DataDir holds profiles/, active.yaml, geo caches, fake-ip cache.
@@ -73,7 +75,7 @@ func FromEnv() ServerEnv {
 	return ServerEnv{
 		ControlPort:   getIntEnv("CONTROL_PORT", 8080),
 		ClashAPIPort:  getIntEnv("CLASH_API_PORT", 9090),
-		MixedPort:     getIntEnv("MIXED_PORT", 7890),
+		MixedPort:     getIntEnv("MIXED_PORT", 0),
 		DataDir:       getEnv("DATA_DIR", "data"),
 		MihomoBin:     getEnv("MIHOMO_BIN", findInPath("mihomo")),
 		ControlToken:  os.Getenv("CONTROL_TOKEN"),
@@ -135,3 +137,5 @@ func getIntEnv(key string, def int) int {
 	}
 	return n
 }
+
+

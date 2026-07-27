@@ -75,7 +75,7 @@ type Options struct {
 	ActiveConfigPath   string
 	ExternalController string
 	Secret             string
-	MixedPort          int // 0 = don't inject mixed-port into active.yaml
+	MixedPort          int  // 0 = don't inject mixed-port into active.yaml
 	StartTimeout       time.Duration
 	StopTimeout        time.Duration
 
@@ -606,8 +606,9 @@ func versionURL(ec string) string {
 
 // injectClashConfig rewrites active.yaml in place: strip any user-authored
 // external-controller/secret/mixed-port (and listener ports clashing with
-// mixed-port), then prepend the supervisor-managed values. This guarantees
-// mihomo binds where we poll.
+// mixed-port), then prepend the supervisor-managed values. When MIXED_PORT
+// env is non-zero, the supervisor locks mixed-port; when 0 (default),
+// mixed-port is left untouched so the mihomo dashboard can edit it.
 func (s *Supervisor) injectClashConfig() error {
 	var existing string
 	if b, err := os.ReadFile(s.opts.ActiveConfigPath); err == nil {
@@ -648,8 +649,9 @@ func (s *Supervisor) injectClashConfig() error {
 }
 
 // shouldStripTopLevelKey reproduces the TS shouldStripTopLevelKey: managed
-// keys are always stripped; listener-port keys are stripped only when their
-// value equals mixedPort (so mihomo doesn't double-bind).
+// keys (external-controller, secret) are always stripped; mixed-port is
+// stripped only when MIXED_PORT env is non-zero; listener-port keys are
+// stripped only when mixed-port is active (to avoid double-binding).
 func shouldStripTopLevelKey(line string, mixedPort int, hasMixed bool) bool {
 	sep := strings.IndexByte(line, ':')
 	if sep == -1 {
@@ -660,8 +662,10 @@ func shouldStripTopLevelKey(line string, mixedPort int, hasMixed bool) bool {
 	// never match.
 	key := strings.TrimRight(line[:sep], " \t")
 	switch key {
-	case "external-controller", "secret", "mixed-port":
+	case "external-controller", "secret":
 		return true
+	case "mixed-port":
+		return hasMixed
 	case "port", "socks-port", "redir-port", "tproxy-port":
 		if !hasMixed {
 			return false

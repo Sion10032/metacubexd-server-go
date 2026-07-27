@@ -66,6 +66,44 @@ services:
 
 所需环境变量见下方 [配置](#️-配置) 章节。
 
+### systemd / OpenRC 服务
+
+将二进制部署为系统服务（需 root 或 sudo）：
+
+```bash
+# 一键安装（自动检测 systemd / OpenRC，生成随机密钥，启用并启动服务）
+curl -fsSL https://raw.githubusercontent.com/Sion10032/metacubexd-server-go/main/deploy/metacubexd-ctl.sh | sudo bash
+```
+
+手动安装：
+
+```bash
+# 1. 安装二进制
+sudo install -m 0755 metacubexd-server-go /usr/local/bin/metacubexd-server
+
+# 2. 创建系统用户
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin metacubexd
+
+# 3. 安装服务文件（根据你的 init 系统选择）
+
+# systemd:
+sudo cp deploy/systemd/metacubexd.service /etc/systemd/system/
+sudo mkdir -p /etc/metacubexd
+cp deploy/systemd/metacubexd.env.sample /etc/metacubexd/metacubexd.env
+# 编辑 /etc/metacubexd/metacubexd.env，填入 CONTROL_TOKEN 和 CLASH_SECRET
+sudo systemctl daemon-reload
+sudo systemctl enable --now metacubexd
+
+# OpenRC:
+sudo cp deploy/openrc/metacubexd.initd /etc/init.d/metacubexd
+sudo cp deploy/openrc/metacubexd.confd /etc/conf.d/metacubexd
+# 编辑 /etc/conf.d/metacubexd，填入 CONTROL_TOKEN 和 CLASH_SECRET
+sudo rc-update add metacubexd default
+sudo rc-service metacubexd start
+```
+
+> **mihomo 内核**：服务不包含 mihomo，需自行安装到 `/usr/local/bin/mihomo`（或在 env 中设置 `MIHOMO_BIN` 指向实际路径）。TUN 模式需要 `CAP_NET_ADMIN` 权限（systemd unit 已配置 `AmbientCapabilities`；OpenRC 的 `start_pre` 会对 mihomo 执行 `setcap`）。
+
 ---
 
 ## ⚙️ 配置
