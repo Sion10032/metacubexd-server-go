@@ -56,7 +56,6 @@ SYSTEM_USER="metacubexd"
 CONF_DIR="/etc/metacubexd"
 DATA_DIR="/var/lib/metacubexd"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ── Colors ────────────────────────────────────────────────────────────────
 
@@ -121,7 +120,7 @@ env_get() {
         sed -n "s/^${key}=//p" "${target}" | tail -1
     else
         # Lines like: export KEY="value" or export KEY=value
-        sed -n "s/^export ${key}=\"\{0,1\}\([^\"\n]*\)\"\{0,1\}$/\1/p" "${target}" | tail -1
+        grep "^export ${key}=" "${target}" | tail -1 | cut -d'=' -f2- | tr -d '"'
     fi
 }
 
@@ -131,18 +130,16 @@ env_set() {
     target="$(env_file)"
     [ -f "${target}" ] || die "Config file not found: ${target}"
 
+    # Use grep -v + append instead of sed to avoid escaping hell.
+    # Remove existing line(s) for this key, then append new value.
     if [ "${INIT_SYSTEM}" = "systemd" ]; then
-        if grep -q "^${key}=" "${target}" 2>/dev/null; then
-            sed -i "s|^${key}=.*|${key}=${val}|" "${target}"
-        else
-            echo "${key}=${val}" >> "${target}"
-        fi
+        grep -v "^${key}=" "${target}" > "${target}.tmp"
+        echo "${key}=${val}" >> "${target}.tmp"
+        mv "${target}.tmp" "${target}"
     else
-        if grep -q "^export ${key}=" "${target}" 2>/dev/null; then
-            sed -i "s|^export ${key}=.*|export ${key}=\"${val}\"|" "${target}"
-        else
-            echo "export ${key}=\"${val}\"" >> "${target}"
-        fi
+        grep -v "^export ${key}=" "${target}" > "${target}.tmp"
+        echo "export ${key}=\"${val}\"" >> "${target}.tmp"
+        mv "${target}.tmp" "${target}"
     fi
 }
 
@@ -166,17 +163,24 @@ install_binary_download() {
         *) die "Unsupported architecture: $(uname -m)" ;;
     esac
 
-    local url
+    # Resolve "latest" to an actual tag via GitHub API.
     if [ "${version}" = "latest" ]; then
-        url="https://github.com/${OWNER}/${REPO}/releases/latest/download/${REPO}_linux_${arch}.tar.gz"
-    else
-        url="https://github.com/${OWNER}/${REPO}/releases/download/${version}/${REPO}_${version}_linux_${arch}.tar.gz"
+        version="$(get_latest_version)"
+        if [ "${version}" = "unknown" ]; then
+            die "Failed to determine latest version from GitHub. Try --version <tag>."
+        fi
+        info "Latest release: ${version}"
     fi
+
+    # Strip leading v from version for the filename (goreleaser name_template
+    # uses .Version which omits the v prefix).
+    local version_no_v="${version#v}"
+    local url="https://github.com/${OWNER}/${REPO}/releases/download/${version}/${REPO}_${version_no_v}_linux_${arch}.tar.gz"
 
     info "Downloading from ${url} ..."
     local tmpdir
     tmpdir="$(mktemp -d)"
-    trap 'rm -rf "${tmpdir}"' RETURN
+    trap 'rm -rf "${tmpdir:-}"' RETURN
 
     if ! curl -fsSL -o "${tmpdir}/release.tar.gz" "${url}"; then
         die "Download failed. Check the version tag and your network."
@@ -193,6 +197,9 @@ install_binary_download() {
 
     install -m 0755 "${extracted}" "${SERVICE_BIN}"
     info "Installed binary → ${SERVICE_BIN}"
+
+    rm -rf "${tmpdir}"
+    trap - RETURN
 }
 
 # ── System user ───────────────────────────────────────────────────────────
@@ -227,14 +234,55 @@ create_user() {
 # ── Service file installation ─────────────────────────────────────────────
 
 install_service_systemd() {
-    local service_dir="${REPO_ROOT}/deploy/systemd"
-    install -m 0644 "${service_dir}/${SERVICE_NAME}.service" /etc/systemd/system/${SERVICE_NAME}.service
-
     mkdir -p "${CONF_DIR}"
+
+    # Systemd unit (embedded)
+    cat > /etc/systemd/system/${SERVICE_NAME}.service << 'SYSTEMD_UNIT'
+[Unit]
+Description=metacubexd-server (All-in-One dashboard + mihomo supervisor)
+Documentation=https://github.com/Sion10032/metacubexd-server-go
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=metacubexd
+Group=metacubexd
+EnvironmentFile=-/etc/metacubexd/metacubexd.env
+Environment=DATA_DIR=/var/lib/metacubexd
+Environment=MIHOMO_BIN=/usr/local/bin/mihomo
+ExecStart=/usr/local/bin/metacubexd-server
+TimeoutStopSec=15
+KillSignal=SIGTERM
+Restart=on-failure
+RestartSec=5
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=true
+StateDirectory=metacubexd
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+DeviceAllow=/dev/net/tun rw
+
+[Install]
+WantedBy=multi-user.target
+SYSTEMD_UNIT
+
+    # Env file (embedded)
     if [ -f "${CONF_DIR}/${SERVICE_NAME}.env" ]; then
         info "Existing env file at ${CONF_DIR}/${SERVICE_NAME}.env — keeping."
     else
-        install -m 0600 "${service_dir}/${SERVICE_NAME}.env.sample" "${CONF_DIR}/${SERVICE_NAME}.env"
+        cat > "${CONF_DIR}/${SERVICE_NAME}.env" << 'ENV_SAMPLE'
+# metacubexd-server env — see README.md for full variable list.
+# Only non-default values need to be set.
+CONTROL_TOKEN=
+CLASH_SECRET=
+# CONTROL_PORT=8080
+# MIXED_PORT=7890
+# TZ=Asia/Shanghai
+ENV_SAMPLE
+        chmod 0600 "${CONF_DIR}/${SERVICE_NAME}.env"
         info "Created env file at ${CONF_DIR}/${SERVICE_NAME}.env"
     fi
 
@@ -243,14 +291,58 @@ install_service_systemd() {
 }
 
 install_service_openrc() {
-    local openrc_dir="${REPO_ROOT}/deploy/openrc"
-    install -m 0755 "${openrc_dir}/${SERVICE_NAME}.initd" /etc/init.d/${SERVICE_NAME}
+    # OpenRC init script (embedded)
+    cat > /etc/init.d/${SERVICE_NAME} << 'OPENRC_INIT'
+#!/sbin/openrc-run
+description="metacubexd-server (All-in-One dashboard + mihomo supervisor)"
+
+: "${MIHOMO_BIN:=/usr/local/bin/mihomo}"
+: "${DATA_DIR:=/var/lib/metacubexd}"
+: "${METACUBEXD_USER:=metacubexd:metacubexd}"
+
+command="/usr/local/bin/metacubexd-server"
+command_user="${METACUBEXD_USER}"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/${RC_SVCNAME}/${RC_SVCNAME}.log"
+error_log="/var/log/${RC_SVCNAME}/${RC_SVCNAME}.log"
+supervisor="supervise-daemon"
+supervise_daemon_args="--pidfile ${pidfile} --stdout ${output_log} --stderr ${error_log}"
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    checkpath -d -o "${METACUBEXD_USER}" -m 0755 /var/log/${RC_SVCNAME}
+    local _user _group
+    _user="${METACUBEXD_USER%%:*}"
+    _group="${METACUBEXD_USER##*:}"
+    [ "${_group}" = "${_user}" ] && _group="${_user}"
+    checkpath -d -o "${_user}" -m 0755 "${DATA_DIR}"
+    if [ -x "${MIHOMO_BIN}" ]; then
+        setcap cap_net_admin+ep "${MIHOMO_BIN}" 2>/dev/null ||             ewarn "setcap failed on ${MIHOMO_BIN}; TUN mode may be unavailable"
+    fi
+}
+OPENRC_INIT
+    chmod 0755 /etc/init.d/${SERVICE_NAME}
 
     mkdir -p "${CONF_DIR}"
     if [ -f "/etc/conf.d/${SERVICE_NAME}" ]; then
         info "Existing conf.d at /etc/conf.d/${SERVICE_NAME} — keeping."
     else
-        install -m 0600 "${openrc_dir}/${SERVICE_NAME}.confd" "/etc/conf.d/${SERVICE_NAME}"
+        cat > "/etc/conf.d/${SERVICE_NAME}" << 'OPENRC_CONF'
+# /etc/conf.d/metacubexd — OpenRC environment variables
+export METACUBEXD_USER="metacubexd:metacubexd"
+export MIHOMO_BIN="/usr/local/bin/mihomo"
+export DATA_DIR="/var/lib/metacubexd"
+export CONTROL_TOKEN=""
+export CLASH_SECRET=""
+# export CONTROL_PORT=8080
+# export MIXED_PORT=7890
+# export TZ="Asia/Shanghai"
+OPENRC_CONF
         info "Created conf.d at /etc/conf.d/${SERVICE_NAME}"
     fi
 
@@ -271,32 +363,48 @@ inject_secrets() {
     local token="${1:-}"
     local secret="${2:-}"
 
-    [ -z "${token}" ] && token="$(openssl rand -hex 16)"
+    # CONTROL_TOKEN empty = no login page (open access).
+    # CLASH_SECRET always auto-generates if not provided.
     [ -z "${secret}" ] && secret="$(openssl rand -hex 16)"
 
     local target
     target="$(env_file)"
 
-    env_set "CONTROL_TOKEN=${token}"
+    if [ -n "${token}" ]; then
+        env_set "CONTROL_TOKEN=${token}"
+    fi
     env_set "CLASH_SECRET=${secret}"
 
     info "Secrets written to ${target}"
     echo ""
-    echo -e "  ${BOLD}CONTROL_TOKEN${RESET} = ${token}"
+    if [ -n "${token}" ]; then
+        echo -e "  ${BOLD}CONTROL_TOKEN${RESET} = ${token}"
+    else
+        echo -e "  ${BOLD}CONTROL_TOKEN${RESET} = (empty — no login page)"
+    fi
     echo -e "  ${BOLD}CLASH_SECRET${RESET}  = ${secret}"
     echo ""
-    warn "Save these values — you will need them to log in."
+    if [ -n "${token}" ]; then
+        warn "Save these values — you will need them to log in."
+    else
+        warn "CONTROL_TOKEN empty — no login page, all access is open."
+    fi
 }
 
 # ── Check mihomo ──────────────────────────────────────────────────────────
 
 check_mihomo() {
-    if command -v mihomo >/dev/null 2>&1; then
-        info "mihomo found at $(command -v mihomo)"
+    local detected
+    detected="$(command -v mihomo 2>/dev/null)"
+    if [ -n "${detected}" ]; then
+        info "mihomo found at ${detected}"
+        # Write detected path into env file so the service actually uses it.
+        env_set "MIHOMO_BIN=${detected}"
     else
         warn "mihomo not found in PATH."
         warn "The server will start but the kernel will not be available."
-        warn "Install mihomo to /usr/local/bin/mihomo or set MIHOMO_BIN in $(env_file)"
+        warn "Install mihomo to /usr/local/bin/mihomo, or:"
+        warn "  bash $(basename "$0") config set MIHOMO_BIN=/path/to/mihomo"
     fi
 }
 
@@ -373,6 +481,16 @@ cmd_install() {
     token_val="$(env_get CONTROL_TOKEN)"
     secret_val="$(env_get CLASH_SECRET)"
     if [ -z "${token_val}" ] && [ -z "${secret_val}" ]; then
+        # If running interactively (stdin is a TTY), prompt for secrets.
+        if [ -t 0 ] && [ -z "${opt_token}" ] && [ -z "${opt_secret}" ]; then
+            echo ""
+            echo -e "  Please input CONTROL_TOKEN, leave empty = no login (fully open)"
+            read -r -p "  CONTROL_TOKEN = " opt_token
+            echo ""
+            echo -e "  Please input CLASH_SECRET, leave empty = auto-generate"
+            read -r -p "  CLASH_SECRET  = " opt_secret
+            echo ""
+        fi
         inject_secrets "${opt_token}" "${opt_secret}"
     else
         info "Config file already has secrets — keeping existing values."
@@ -457,14 +575,24 @@ cmd_uninstall() {
 # get_latest_version queries GitHub for the latest release tag.
 get_latest_version() {
     local url="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
-    local tag
-    tag=$(curl -fsSL "${url}" 2>/dev/null | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\\([^"]*\\)".*/\1/')
+    local tmpf resp_code http_code tag
+    tmpf="$(mktemp)"
+    resp_code=$(curl -sSL -w '%{http_code}' -o "${tmpf}" "${url}" 2>/dev/null)
+    http_code="${resp_code: -3}"
+    if [ "${http_code}" != "200" ]; then
+        rm -f "${tmpf}"
+        echo "unknown"
+        return
+    fi
+    tag=$(grep -o '"tag_name": *"[^"]*"' "${tmpf}" | cut -d'"' -f4)
+    rm -f "${tmpf}"
     if [ -n "${tag}" ]; then
         echo "${tag}"
     else
         echo "unknown"
     fi
 }
+
 
 # get_installed_version prints the installed binary version.
 get_installed_version() {

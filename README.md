@@ -77,31 +77,21 @@ Deploy the binary as a system service (requires root or sudo):
 curl -fsSL https://raw.githubusercontent.com/Sion10032/metacubexd-server-go/main/deploy/metacubexd-ctl.sh | sudo bash
 ```
 
-Manual installation:
+Manual installation (from release tarball):
 
 ```bash
-# 1. Install the binary
-sudo install -m 0755 metacubexd-server-go /usr/local/bin/metacubexd-server
+tar xzf metacubexd-server-go_*.tar.gz
+cd metacubexd-server-go_*/
+sudo bash deploy/metacubexd-ctl.sh install
 
-# 2. Create system user
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin metacubexd
+# Or with a local binary:
+sudo bash deploy/metacubexd-ctl.sh install --bin ./metacubexd-server-go
 
-# 3. Install service files (choose based on your init system)
-
-# systemd:
-sudo cp deploy/systemd/metacubexd.service /etc/systemd/system/
-sudo mkdir -p /etc/metacubexd
-cp deploy/systemd/metacubexd.env.sample /etc/metacubexd/metacubexd.env
-# Edit /etc/metacubexd/metacubexd.env, set CONTROL_TOKEN and CLASH_SECRET
-sudo systemctl daemon-reload
-sudo systemctl enable --now metacubexd
-
-# OpenRC:
-sudo cp deploy/openrc/metacubexd.initd /etc/init.d/metacubexd
-sudo cp deploy/openrc/metacubexd.confd /etc/conf.d/metacubexd
-# Edit /etc/conf.d/metacubexd, set CONTROL_TOKEN and CLASH_SECRET
-sudo rc-update add metacubexd default
-sudo rc-service metacubexd start
+# Other commands:
+# bash deploy/metacubexd-ctl.sh config show          # view config
+# bash deploy/metacubexd-ctl.sh config set KEY=VAL   # change config
+# bash deploy/metacubexd-ctl.sh update               # upgrade
+# bash deploy/metacubexd-ctl.sh uninstall            # remove
 ```
 
 > **mihomo kernel**: The service does not include mihomo; install it at `/usr/local/bin/mihomo` (or set `MIHOMO_BIN` in the env file to the actual path). TUN mode requires `CAP_NET_ADMIN` capability (the systemd unit already has `AmbientCapabilities` configured; OpenRC's `start_pre` runs `setcap` on mihomo).
