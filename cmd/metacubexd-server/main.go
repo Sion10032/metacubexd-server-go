@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -45,6 +46,21 @@ var (
 )
 
 func main() {
+	// Handle --version / -v / version before any side effects. The full
+	// server must not start when the caller just wants the version string
+	// (e.g. metacubexd-ctl.sh update checks the installed binary this way).
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v", "version":
+			fmt.Printf("metacubexd-server-go %s (commit: %s, built: %s) %s/%s\n",
+				version, commit, date, runtime.GOOS, runtime.GOARCH)
+			return
+		case "-h", "--help", "help":
+			printUsage()
+			return
+		}
+	}
+
 	log.Printf("[server] metacubexd-server-go %s (commit: %s, built: %s)", version, commit, date)
 
 	env := config.FromEnv()
@@ -232,6 +248,21 @@ func main() {
 		log.Printf("[server] supervisor dispose: %v", err)
 	}
 	log.Printf("[server] bye")
+}
+
+// printUsage writes the CLI help text to stdout.
+func printUsage() {
+	fmt.Printf(`metacubexd-server-go %s
+
+Usage:
+  metacubexd-server [flags]
+
+Flags:
+  -h, --help     show this help
+  -v, --version  print version and exit
+
+Configuration is via environment variables; see README.md § 配置 > 环境变量.
+`, version)
 }
 
 // formatKernelState renders a one-line summary for the boot log.
