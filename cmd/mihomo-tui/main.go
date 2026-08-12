@@ -3,8 +3,13 @@ package main
 
 import (
 	"flag"
-	"fmt"
+	"log"
 	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui"
 )
 
 // defaultEndpoint mirrors the server's CONTROL_PORT default (8080) so a local
@@ -25,10 +30,8 @@ func main() {
 	)
 	flag.Parse()
 
-	// TUI not implemented yet (Phase 1d): print resolved config and exit.
-	fmt.Printf("mihomo-tui: tui not implemented yet (endpoint=%s insecure=%t)\n", *endpoint, *insecure)
-	if *token != "" {
-		fmt.Println("mihomo-tui: token set (redacted)")
+	client := ctl.NewClient(*endpoint, *token, *insecure)
+	if _, err := tea.NewProgram(tui.New(client)).Run(); err != nil {
+		log.Fatalf("mihomo-tui: %v", err)
 	}
-	os.Exit(1)
 }
