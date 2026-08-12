@@ -553,7 +553,7 @@ func (m Model) View() string {
 	// TEMP diagnostic: show the resolved window size until the short-window
 	// report is confirmed — remove once verified.
 	size := fmt.Sprintf(" %dx%d ", w, h)
-	help := helpLine
+	help := tabHelp(m.activeTab)
 	switch {
 	case m.filtering:
 		help = "filter: " + m.filterInput + "▌  (enter:apply  esc:cancel)"
@@ -562,12 +562,14 @@ func (m Model) View() string {
 	case m.confirmDel:
 		help = "⚠ 删除所选 profile? (y 确认 / 其他取消)"
 	default:
-		// Surface the follow-at-bottom state on the help line.
-		flag := "ON"
-		if !m.logs.follow {
-			flag = "OFF"
+		// Surface the follow-at-bottom state on the Logs tab only.
+		if m.activeTab == 0 {
+			flag := "ON"
+			if !m.logs.follow {
+				flag = "OFF"
+			}
+			help = strings.Replace(help, "f:follow", "f:follow("+flag+")", 1)
 		}
-		help = strings.Replace(helpLine, "f:follow", "f:follow("+flag+")", 1)
 	}
 	return strings.Join([]string{
 		frameTop(inner, title, size),
@@ -687,8 +689,20 @@ func renderKernelTab(state *supervisor.KernelState, selected int, err error, con
 // tabTitles are the tab names, one per index.
 var tabTitles = []string{"Logs", "Profiles", "Config"}
 
-// helpLine lists the key bindings.
-const helpLine = "1-3:tabs  ↑↓:select  enter:run  /:filter  f:follow  q:quit"
+// tabHelp lists the key bindings for a tab; the footer switches with the tab
+// so only the relevant operations are shown.
+var helpByTab = [][]string{
+	// Logs
+	{"1-3:tabs", "/:filter", "f:follow", "q:quit"},
+	// Profiles
+	{"1-3:tabs", "a:activate", "u:refresh", "d:delete", "i:import", "q:quit"},
+	// Config
+	{"1-3:tabs", "↑↓:select", "enter:run", "q:quit"},
+}
+
+func tabHelp(active int) string {
+	return strings.Join(helpByTab[active], "  ")
+}
 
 // renderTabs renders the tab bar, highlighting the active tab.
 func renderTabs(active int) string {

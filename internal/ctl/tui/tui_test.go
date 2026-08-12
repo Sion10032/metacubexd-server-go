@@ -19,10 +19,39 @@ func TestViewLayout(t *testing.T) {
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	got := ansiRe.ReplaceAllString(m.View(), "")
-	for _, want := range []string{"[1] Logs", "[2] Profiles", "[3] Config", "enter:run", "q:quit"} {
+	for _, want := range []string{"[1] Logs", "[2] Profiles", "[3] Config", "/:filter", "f:follow(ON)", "q:quit"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("View = %q, missing %q", got, want)
 		}
+	}
+}
+
+// TestTabHelp verifies the footer switches with the tab, showing only the
+// relevant operations.
+func TestTabHelp(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+
+	// Logs tab: filter/follow.
+	if got := m.View(); !strings.Contains(got, "/:filter") {
+		t.Errorf("Logs footer missing filter: %q", got)
+	}
+
+	// Profiles tab: profile operations.
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	got := nm.View()
+	for _, want := range []string{"a:activate", "u:refresh", "d:delete", "i:import"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Profiles footer missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "/:filter") {
+		t.Error("Profiles footer should not show log filter")
+	}
+
+	// Config tab: kernel selection.
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	if got := nm.View(); !strings.Contains(got, "enter:run") {
+		t.Errorf("Config footer missing enter:run:\n%s", got)
 	}
 }
 
