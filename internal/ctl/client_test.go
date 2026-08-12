@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"metacubexd-server-go/internal/supervisor"
@@ -111,5 +112,59 @@ func TestKernelStatus(t *testing.T) {
 	}
 	if st.ExternalController != "127.0.0.1:9090" {
 		t.Errorf("ExternalController = %q, want 127.0.0.1:9090", st.ExternalController)
+	}
+}
+
+// TestKernelOps covers all five kernel POST operations: success decodes the
+// returned state, failure surfaces the server-provided lastError.
+func TestKernelOps(t *testing.T) {
+	ops := []struct {
+		name string
+		call func(*Client) (supervisor.KernelState, error)
+		path string
+	}{
+		{"start", func(c *Client) (supervisor.KernelState, error) { return c.KernelStart() }, "/api/control/kernel/start"},
+		{"stop", func(c *Client) (supervisor.KernelState, error) { return c.KernelStop() }, "/api/control/kernel/stop"},
+		{"restart", func(c *Client) (supervisor.KernelState, error) { return c.KernelRestart() }, "/api/control/kernel/restart"},
+		{"rollback", func(c *Client) (supervisor.KernelState, error) { return c.KernelRollback() }, "/api/control/kernel/rollback"},
+		{"recover", func(c *Client) (supervisor.KernelState, error) { return c.KernelRecover() }, "/api/control/kernel/recover"},
+	}
+
+	for _, op := range ops {
+		t.Run(op.name+" ok", func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.RequestURI != op.path {
+					t.Errorf("unexpected request: %s %s", r.Method, r.RequestURI)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"status":"stopped"}`)
+			}))
+			defer srv.Close()
+
+			c := NewClient(srv.URL, "", false)
+			st, err := op.call(c)
+			if err != nil {
+				t.Fatalf("%s: %v", op.name, err)
+			}
+			if st.Status != supervisor.StatusStopped {
+				t.Errorf("Status = %q, want %q", st.Status, supervisor.StatusStopped)
+			}
+		})
+
+		t.Run(op.name+" error", func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprint(w, `{"status":"errored","lastError":"binary not found"}`)
+			}))
+			defer srv.Close()
+
+			c := NewClient(srv.URL, "", false)
+			if _, err := op.call(c); err == nil {
+				t.Fatalf("%s: want error, got nil", op.name)
+			} else if !strings.Contains(err.Error(), "binary not found") {
+				t.Errorf("%s: error = %q, want lastError message", op.name, err)
+			}
+		})
 	}
 }

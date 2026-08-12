@@ -77,3 +77,40 @@ func decodeState(resp *http.Response) (supervisor.KernelState, error) {
 	}
 	return st, nil
 }
+
+// KernelStart starts the kernel and returns the new state.
+func (c *Client) KernelStart() (supervisor.KernelState, error) {
+	return c.postKernel("/api/control/kernel/start")
+}
+
+// KernelStop stops the kernel and returns the new state.
+func (c *Client) KernelStop() (supervisor.KernelState, error) {
+	return c.postKernel("/api/control/kernel/stop")
+}
+
+// KernelRestart restarts the kernel and returns the new state.
+func (c *Client) KernelRestart() (supervisor.KernelState, error) {
+	return c.postKernel("/api/control/kernel/restart")
+}
+
+// KernelRollback restores the last-known-good active config and restarts.
+func (c *Client) KernelRollback() (supervisor.KernelState, error) {
+	return c.postKernel("/api/control/kernel/rollback")
+}
+
+// KernelRecover resets the active config to header-only and restarts on
+// mihomo defaults — the last-resort escape hatch for a bricked config.
+func (c *Client) KernelRecover() (supervisor.KernelState, error) {
+	return c.postKernel("/api/control/kernel/recover")
+}
+
+// postKernel performs a POST to a kernel control path and decodes the
+// resulting kernel state.
+func (c *Client) postKernel(path string) (supervisor.KernelState, error) {
+	resp, err := c.do(http.MethodPost, path, nil)
+	if err != nil {
+		return supervisor.KernelState{}, err
+	}
+	defer resp.Body.Close()
+	return decodeState(resp)
+}
