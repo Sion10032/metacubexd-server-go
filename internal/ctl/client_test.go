@@ -1,11 +1,13 @@
 package ctl
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"metacubexd-server-go/internal/supervisor"
 )
@@ -166,5 +168,62 @@ func TestKernelOps(t *testing.T) {
 				t.Errorf("%s: error = %q, want lastError message", op.name, err)
 			}
 		})
+	}
+}
+
+// TestSubscribeLogs streams SSE events from a fake server, then verifies a
+// context cancel closes the channel promptly (no goroutine leak).
+func TestSubscribeLogs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.RequestURI != "/api/control/kernel/logs" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.RequestURI)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
+			t.Errorf("Authorization = %q, want Bearer tok", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		for i := 0; i < 5; i++ {
+			fmt.Fprintf(w, "data: {\"type\":\"log\",\"line\":\"line %d\"}\n\n", i)
+			flusher.Flush()
+		}
+		// Keep the stream open until the client disconnects.
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok", false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, err := c.SubscribeLogs(ctx)
+	if err != nil {
+		t.Fatalf("SubscribeLogs: %v", err)
+	}
+
+	for i := 0; i < 5; i++ {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				t.Fatalf("channel closed after %d events", i)
+			}
+			if !strings.Contains(ev.Data, "line ") {
+				t.Errorf("event %d Data = %q, want log line", i, ev.Data)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for event %d", i)
+		}
+	}
+
+	// Cancelling must close the channel promptly — a leak would block here
+	// until the timeout fires.
+	cancel()
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Error("channel still open after cancel")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel not closed after cancel — goroutine leak")
 	}
 }
