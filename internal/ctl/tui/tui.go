@@ -307,8 +307,14 @@ func (m Model) startKernelOp(op kernelOp) (Model, tea.Cmd) {
 
 // View renders the framed layout: bordered box with a title, status bar, tab
 // bar, active tab body and the key binding help line. The frame fills the
-// whole terminal window.
+// whole terminal window. Narrow screens (under narrowWidth columns) get the
+// bare log stream instead — no frame, no tabs.
 func (m Model) View() string {
+	if m.width > 0 && m.width < narrowWidth {
+		m.logs.SetSize(m.width, m.height)
+		return m.logs.View()
+	}
+
 	w, h := m.width, m.height
 	if w < minWidth {
 		w = minWidth
@@ -388,10 +394,12 @@ func (m Model) body(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// Minimum frame dimensions.
+// Minimum frame dimensions and the narrow-screen threshold below which the
+// frame is dropped in favor of a bare log stream.
 const (
-	minWidth  = 40
-	minHeight = 10
+	minWidth    = 40
+	minHeight   = 10
+	narrowWidth = 60
 )
 
 // frameTop renders the top border with the title embedded on the left and an

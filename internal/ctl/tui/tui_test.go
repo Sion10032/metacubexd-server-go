@@ -68,3 +68,25 @@ func TestWindowResize(t *testing.T) {
 		}
 	}
 }
+
+// TestNarrowScreen verifies a terminal under narrowWidth columns renders the
+// bare log stream without the frame or tabs.
+func TestNarrowScreen(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
+	nm, _ = nm.Update(logMsg{line: "hello narrow"})
+
+	got := nm.View()
+	if strings.Contains(got, "┌") {
+		t.Errorf("narrow view should skip the frame, got: %q", got)
+	}
+	if !strings.Contains(got, "hello narrow") {
+		t.Errorf("narrow view missing log content: %q", got)
+	}
+
+	// Wide enough windows keep the frame.
+	nm, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	if got := nm.View(); !strings.Contains(got, "┌─ mihomo-tui") {
+		t.Errorf("wide view should keep the frame: %q", got)
+	}
+}
