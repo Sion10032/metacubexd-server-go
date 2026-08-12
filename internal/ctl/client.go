@@ -4,6 +4,7 @@ package ctl
 
 import (
 	"crypto/tls"
+	"io"
 	"net/http"
 	"time"
 )
@@ -29,4 +30,19 @@ func NewClient(endpoint, token string, insecure bool) *Client {
 		token:    token,
 		hc:       &http.Client{Timeout: 30 * time.Second, Transport: transport},
 	}
+}
+
+// do performs a request against endpoint+path, attaching the bearer token
+// (when configured) and requesting JSON. The caller must close the returned
+// response body.
+func (c *Client) do(method, path string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequest(method, c.endpoint+path, body)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("Accept", "application/json")
+	return c.hc.Do(req)
 }
