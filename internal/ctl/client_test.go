@@ -56,3 +56,25 @@ func TestClientAcceptJSON(t *testing.T) {
 		t.Errorf("Accept = %q, want application/json", gotAccept)
 	}
 }
+
+// TestClientPath verifies the request URL is exactly endpoint+path, including
+// query strings.
+func TestClientPath(t *testing.T) {
+	var gotURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.RequestURI
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", false)
+	for _, path := range []string{
+		"/api/control/kernel/status",
+		"/api/control/kernel/logs?follow=1",
+	} {
+		mustDo(t, c, http.MethodGet, path)
+		if gotURI != path {
+			t.Errorf("request target = %q, want %q", gotURI, path)
+		}
+	}
+}
