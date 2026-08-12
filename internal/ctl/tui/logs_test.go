@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +78,42 @@ func TestLogsAppend(t *testing.T) {
 	l.append("line three")
 	if len(l.lines) != 2 {
 		t.Errorf("lines after filter = %d, want 2 (filtered line dropped)", len(l.lines))
+	}
+}
+
+// TestLogsCap verifies the retained lines are capped to bound memory.
+func TestLogsCap(t *testing.T) {
+	l := NewLogsModel()
+	for i := 0; i < maxLogLines+50; i++ {
+		l.append(fmt.Sprintf("line %d", i))
+	}
+	if len(l.lines) != maxLogLines {
+		t.Errorf("lines = %d, want cap %d", len(l.lines), maxLogLines)
+	}
+	if l.lines[0] != "line 50" || l.lines[len(l.lines)-1] != fmt.Sprintf("line %d", maxLogLines+49) {
+		t.Errorf("kept window wrong: first=%q last=%q", l.lines[0], l.lines[len(l.lines)-1])
+	}
+}
+
+// TestSetSizeFollowsBottom reproduces the short-window bug: lines appended
+// while the viewport is at its default height leave blank space below after a
+// resize. Resizing while following must re-scroll to the bottom.
+func TestSetSizeFollowsBottom(t *testing.T) {
+	l := NewLogsModel() // default viewport height 20
+	for i := 0; i < 100; i++ {
+		l.append(fmt.Sprintf("line %d", i))
+	}
+
+	l.SetSize(80, 32) // resize like View() does with a 39-row window
+	lines := strings.Split(strings.TrimRight(l.View(), "\n"), "\n")
+	if len(lines) != 32 {
+		t.Fatalf("viewport rendered %d lines, want 32", len(lines))
+	}
+	if !strings.Contains(lines[len(lines)-1], "line 99") {
+		t.Errorf("bottom line = %q, want line 99", lines[len(lines)-1])
+	}
+	if strings.TrimSpace(lines[0]) == "" {
+		t.Error("first visible line is blank — view is not at the bottom")
 	}
 }
 

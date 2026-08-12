@@ -25,10 +25,15 @@ func NewLogsModel() LogsModel {
 	}
 }
 
-// SetSize resizes the log viewport.
+// SetSize resizes the log viewport. When following, the view re-scrolls to
+// the bottom so the latest lines stay visible after a resize — without this,
+// the scroll offset computed at the old height leaves blank space below.
 func (l *LogsModel) SetSize(width, height int) {
 	l.viewport.Width = width
 	l.viewport.Height = height
+	if l.follow {
+		l.viewport.GotoBottom()
+	}
 }
 
 // Update forwards messages to the viewport.
@@ -38,6 +43,10 @@ func (l *LogsModel) Update(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
+// maxLogLines caps the retained log lines to bound memory; the viewport only
+// ever shows a window of them.
+const maxLogLines = 1000
+
 // append adds a log line, respecting the active filter, and re-renders the
 // viewport. When follow is enabled the viewport scrolls to the bottom.
 func (l *LogsModel) append(line string) {
@@ -45,6 +54,9 @@ func (l *LogsModel) append(line string) {
 		return
 	}
 	l.lines = append(l.lines, line)
+	if len(l.lines) > maxLogLines {
+		l.lines = append([]string(nil), l.lines[len(l.lines)-maxLogLines:]...)
+	}
 	l.viewport.SetContent(strings.Join(l.lines, "\n"))
 	if l.follow {
 		l.viewport.GotoBottom()

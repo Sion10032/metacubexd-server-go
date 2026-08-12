@@ -274,7 +274,10 @@ func (m Model) body(width, height int) string {
 	}
 	lines := strings.Split(content, "\n")
 	for i, l := range lines {
-		lines[i] = frameRow(l, width)
+		// MaxWidth guards against wide/emoji content overflowing the right
+		// border when the computed width and the terminal's rendering differ.
+		clipped := lipgloss.NewStyle().MaxWidth(width).Render(l)
+		lines[i] = frameRow(clipped, width)
 	}
 	return strings.Join(lines, "\n")
 }
