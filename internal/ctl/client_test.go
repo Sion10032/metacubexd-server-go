@@ -1,9 +1,12 @@
 package ctl
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"metacubexd-server-go/internal/supervisor"
 )
 
 // mustDo performs a request via the client and fails the test on error. The
@@ -76,5 +79,37 @@ func TestClientPath(t *testing.T) {
 		if gotURI != path {
 			t.Errorf("request target = %q, want %q", gotURI, path)
 		}
+	}
+}
+
+// TestKernelStatus verifies KernelState JSON decodes into the shared
+// supervisor contract type.
+func TestKernelStatus(t *testing.T) {
+	const body = `{"status":"running","pid":12345,"startedAt":1723456789,"version":"v1.19.29","externalController":"127.0.0.1:9090","secret":"s3cret","lastExitCode":0}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.RequestURI != "/api/control/kernel/status" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.RequestURI)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", false)
+	st, err := c.KernelStatus()
+	if err != nil {
+		t.Fatalf("KernelStatus: %v", err)
+	}
+	if st.Status != supervisor.StatusRunning {
+		t.Errorf("Status = %q, want %q", st.Status, supervisor.StatusRunning)
+	}
+	if st.PID == nil || *st.PID != 12345 {
+		t.Errorf("PID = %v, want 12345", st.PID)
+	}
+	if st.Version != "v1.19.29" {
+		t.Errorf("Version = %q, want v1.19.29", st.Version)
+	}
+	if st.ExternalController != "127.0.0.1:9090" {
+		t.Errorf("ExternalController = %q, want 127.0.0.1:9090", st.ExternalController)
 	}
 }

@@ -4,9 +4,13 @@ package ctl
 
 import (
 	"crypto/tls"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
+
+	"metacubexd-server-go/internal/supervisor"
 )
 
 // Client talks to the metacubexd-server control API. It is safe for
@@ -45,4 +49,31 @@ func (c *Client) do(method, path string, body io.Reader) (*http.Response, error)
 	}
 	req.Header.Set("Accept", "application/json")
 	return c.hc.Do(req)
+}
+
+// KernelStatus fetches the current kernel state from the server.
+func (c *Client) KernelStatus() (supervisor.KernelState, error) {
+	resp, err := c.do(http.MethodGet, "/api/control/kernel/status", nil)
+	if err != nil {
+		return supervisor.KernelState{}, err
+	}
+	defer resp.Body.Close()
+	return decodeState(resp)
+}
+
+// decodeState decodes a supervisor.KernelState and returns an error when the
+// response is not 2xx, preferring the server-provided lastError message.
+func decodeState(resp *http.Response) (supervisor.KernelState, error) {
+	var st supervisor.KernelState
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return st, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg := st.LastError
+		if msg == "" {
+			msg = resp.Status
+		}
+		return st, errors.New(msg)
+	}
+	return st, nil
 }
