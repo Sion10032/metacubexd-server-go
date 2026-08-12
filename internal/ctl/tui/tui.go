@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -18,22 +19,28 @@ import (
 // Model is the top-level Bubble Tea model. It owns the kernel state, the log
 // viewport and the current tab.
 type Model struct {
-	client    *ctl.Client
-	state     *supervisor.KernelState
-	err       error
-	logs      LogsModel
-	activeTab int
-	kSelected int
-	width     int
-	height    int
-	logCh     <-chan ctl.Event
-	logCancel context.CancelFunc
-	quitting  bool
+	client     *ctl.Client
+	state      *supervisor.KernelState
+	err        error
+	logs       LogsModel
+	activeTab  int
+	kSelected  int
+	kConfirming bool
+	operating  bool
+	spinner    spinner.Model
+	width      int
+	height     int
+	logCh      <-chan ctl.Event
+	logCancel  context.CancelFunc
+	quitting   bool
 }
 
 // New returns a Model for the given control API client.
 func New(client *ctl.Client) Model {
-	return Model{client: client, logs: NewLogsModel()}
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	return Model{client: client, logs: NewLogsModel(), spinner: s}
 }
 
 // statusLoadedMsg carries a fresh kernel state from the control API.
@@ -191,9 +198,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case statusLoadedMsg:
 		m.state = &msg.state
+		m.operating = false
+		m.kConfirming = false
 		return m, nil
 	case statusErrorMsg:
 		m.err = msg.err
+		m.operating = false
+		m.kConfirming = false
+		return m, nil
+	case spinner.TickMsg:
+		if m.operating {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
 		return m, nil
 	case subscribedMsg:
 		m.logCancel = msg.cancel
@@ -237,12 +255,14 @@ func kernelOpCmd(c *ctl.Client, op func(*ctl.Client) (supervisor.KernelState, er
 	}
 }
 
-// kernelOps are the operations available on the Kernel tab, in selection
+// kernelOps are the operations available on the Config tab, in selection
 // order.
-var kernelOps = []struct {
+type kernelOp struct {
 	label string
 	op    func(*ctl.Client) (supervisor.KernelState, error)
-}{
+}
+
+var kernelOps = []kernelOp{
 	{"Start", (*ctl.Client).KernelStart},
 	{"Stop", (*ctl.Client).KernelStop},
 	{"Restart", (*ctl.Client).KernelRestart},
@@ -250,9 +270,17 @@ var kernelOps = []struct {
 	{"Recover", (*ctl.Client).KernelRecover},
 }
 
-// updateKernelKeys handles selection and execution keys while the Kernel tab
-// is active.
+// updateKernelKeys handles selection, execution and the Recover confirmation
+// while the Config tab is active. Recover is destructive, so Enter on it
+// enters a confirm state where only "y" runs it.
 func (m Model) updateKernelKeys(key string) (Model, tea.Cmd) {
+	if m.kConfirming {
+		m.kConfirming = false
+		if key == "y" || key == "Y" {
+			return m.startKernelOp(kernelOps[m.kSelected])
+		}
+		return m, nil
+	}
 	switch key {
 	case "up", "k":
 		m.kSelected = (m.kSelected + len(kernelOps) - 1) % len(kernelOps)
@@ -260,9 +288,20 @@ func (m Model) updateKernelKeys(key string) (Model, tea.Cmd) {
 		m.kSelected = (m.kSelected + 1) % len(kernelOps)
 	case "enter", " ":
 		op := kernelOps[m.kSelected]
-		return m, kernelOpCmd(m.client, op.op)
+		if op.label == "Recover" {
+			m.kConfirming = true
+			return m, nil
+		}
+		return m.startKernelOp(op)
 	}
 	return m, nil
+}
+
+// startKernelOp marks the operation as running, starts the spinner and issues
+// the operation command.
+func (m Model) startKernelOp(op kernelOp) (Model, tea.Cmd) {
+	m.operating = true
+	return m, tea.Batch(kernelOpCmd(m.client, op.op), m.spinner.Tick)
 }
 
 // View renders the framed layout: bordered box with a title, status bar, tab
@@ -290,6 +329,9 @@ func (m Model) View() string {
 	if m.err != nil {
 		statusLine += "  " + errorStyle.Render("⚠ "+m.err.Error())
 	}
+	if m.operating {
+		statusLine += "  " + m.spinner.View() + " " + kernelOps[m.kSelected].label + "…"
+	}
 
 	title := " mihomo-tui · " + m.client.Endpoint() + " "
 	// TEMP diagnostic: show the resolved window size until the short-window
@@ -316,7 +358,7 @@ func (m Model) body(width, height int) string {
 	case 0:
 		content = m.logs.View()
 	case 2:
-		content = renderKernelTab(m.state, m.kSelected, m.err)
+		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(renderKernelTab(m.state, m.kSelected, m.err, m.kConfirming))
 	default:
 		content = lipgloss.NewStyle().
 			Width(width).Height(height).
@@ -365,8 +407,9 @@ func frameRow(content string, inner int) string {
 
 // renderKernelTab renders the kernel control section of the Config tab:
 // state summary, last error and the operation list with the selection
-// highlighted. Config editing (Phase 3) lands below this section.
-func renderKernelTab(state *supervisor.KernelState, selected int, err error) string {
+// highlighted. Config editing (Phase 3) lands below this section. When
+// confirming, a destructive-operation prompt is appended.
+func renderKernelTab(state *supervisor.KernelState, selected int, err error, confirming bool) string {
 	lines := []string{renderStatus(state, "")}
 	if err != nil {
 		lines = append(lines, errorStyle.Render("⚠ "+err.Error()))
@@ -381,6 +424,9 @@ func renderKernelTab(state *supervisor.KernelState, selected int, err error) str
 			prefix, label = "> ", selectedStyle.Render(op.label)
 		}
 		lines = append(lines, prefix+label)
+	}
+	if confirming {
+		lines = append(lines, "", errorStyle.Render("⚠ Recover 将重置 active config,确认执行? (y 确认 / 其他取消)"))
 	}
 	lines = append(lines, "", lipgloss.NewStyle().Faint(true).Render("config editor — Phase 3"))
 	return strings.Join(lines, "\n")

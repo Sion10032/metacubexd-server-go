@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -14,13 +15,29 @@ import (
 	"metacubexd-server-go/internal/ctl"
 )
 
+// runBatch executes every command in a batch, returning the produced messages.
+func runBatch(t *testing.T, cmd tea.Cmd) []tea.Msg {
+	t.Helper()
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want tea.BatchMsg", cmd())
+	}
+	var msgs []tea.Msg
+	for _, c := range batch {
+		if m := c(); m != nil {
+			msgs = append(msgs, m)
+		}
+	}
+	return msgs
+}
+
 // TestKernelTabRender verifies the kernel tab lists every operation with the
 // selected entry highlighted.
 func TestKernelTabRender(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(termenv.Ascii)
 
-	got := renderKernelTab(nil, 0, nil)
+	got := renderKernelTab(nil, 0, nil, false)
 	plain := ansiRe.ReplaceAllString(got, "")
 	for _, want := range []string{"Start", "Stop", "Restart", "Rollback", "Recover"} {
 		if !strings.Contains(plain, want) {
@@ -68,11 +85,94 @@ func TestKernelTabExecute(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("enter returned no command")
 	}
-	if _, ok := cmd().(statusLoadedMsg); !ok {
-		t.Fatalf("cmd returned %T, want statusLoadedMsg", cmd())
+	if !nm.(Model).operating {
+		t.Error("operating should be true while the operation runs")
 	}
+	runBatch(t, cmd) // spinner tick + kernel op
 	if want := "POST /api/control/kernel/start"; gotURI != want {
 		t.Errorf("request = %q, want %q", gotURI, want)
+	}
+}
+
+// TestRecoverConfirm verifies Enter on Recover asks for confirmation first,
+// "y" runs it and any other key cancels.
+func TestRecoverConfirm(t *testing.T) {
+	var gotURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.Method + " " + r.RequestURI
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"starting"}`)
+	}))
+	defer srv.Close()
+
+	m := New(ctl.NewClient(srv.URL, "", false))
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")}) // Config tab
+	for i := 0; i < 4; i++ {
+		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	// Enter on Recover enters the confirm state instead of running it.
+	nm, _ = nm.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("confirm state should not issue a command")
+	}
+	if !nm.(Model).kConfirming {
+		t.Fatal("kConfirming should be true")
+	}
+	if got := nm.View(); !strings.Contains(got, "确认执行") {
+		t.Errorf("View missing confirm prompt:\n%s", got)
+	}
+
+	// "y" runs Recover.
+	nm, cmd = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if cmd == nil {
+		t.Fatal("y returned no command")
+	}
+	runBatch(t, cmd)
+	if want := "POST /api/control/kernel/recover"; gotURI != want {
+		t.Errorf("request = %q, want %q", gotURI, want)
+	}
+
+	// Any other key cancels without issuing a request.
+	gotURI = ""
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyDown})
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")}) // back to config
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm, cmd = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if cmd != nil {
+		t.Fatal("cancelling should not issue a command")
+	}
+	if gotURI != "" {
+		t.Errorf("unexpected request after cancel: %q", gotURI)
+	}
+	if nm.(Model).kConfirming {
+		t.Error("kConfirming should be false after cancel")
+	}
+}
+
+// TestSpinnerTick verifies spinner ticks keep flowing while operating.
+func TestSpinnerTick(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter}) // Start
+
+	// Batch returns the child commands; find the spinner tick among them.
+	msgs := runBatch(t, cmd)
+	var tickMsg tea.Msg
+	for _, m := range msgs {
+		if _, ok := m.(spinner.TickMsg); ok {
+			tickMsg = m
+			break
+		}
+	}
+	if tickMsg == nil {
+		t.Fatalf("no spinner.TickMsg in batch, got %T", msgs)
+	}
+	nm, cmd = nm.Update(tickMsg)
+	if cmd == nil {
+		t.Fatal("spinner tick should keep the animation running")
 	}
 	_ = nm
 }
