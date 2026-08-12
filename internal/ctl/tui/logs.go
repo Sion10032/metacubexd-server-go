@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -34,6 +36,24 @@ func (l *LogsModel) Update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	l.viewport, cmd = l.viewport.Update(msg)
 	return cmd
+}
+
+// append adds a log line, respecting the active filter, and re-renders the
+// viewport. When follow is enabled the viewport scrolls to the bottom.
+func (l *LogsModel) append(line string) {
+	if l.filter != "" && !strings.Contains(stripANSI(line), l.filter) {
+		return
+	}
+	l.lines = append(l.lines, line)
+	l.viewport.SetContent(strings.Join(l.lines, "\n"))
+	if l.follow {
+		l.viewport.GotoBottom()
+	}
+}
+
+// stripANSI removes SGR escape sequences for plain-text matching.
+func stripANSI(s string) string {
+	return ansiRe.ReplaceAllString(s, "")
 }
 
 // View renders the viewport contents, or a centered hint filling the whole

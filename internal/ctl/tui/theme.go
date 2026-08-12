@@ -1,10 +1,16 @@
 package tui
 
 import (
+	"regexp"
+
 	"github.com/charmbracelet/lipgloss"
 
 	"metacubexd-server-go/internal/supervisor"
 )
+
+// ansiRe matches SGR escape sequences; used to strip colors for plain-text
+// matching and test assertions.
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // Status styles colored by kernel state: running green, errored red,
 // starting/stopping yellow, stopped grey.

@@ -2,6 +2,8 @@
 package tui
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -23,6 +25,8 @@ type Model struct {
 	activeTab int
 	width     int
 	height    int
+	logCh     <-chan ctl.Event
+	logCancel context.CancelFunc
 	quitting  bool
 }
 
@@ -44,13 +48,98 @@ type statusErrorMsg struct {
 // tickMsg fires once per second to refresh the kernel status.
 type tickMsg struct{}
 
-// Init returns the initial commands: fetch kernel status once, then poll it
-// every second; the SSE log subscription lands in a later step (1.22).
+// subscribedMsg carries the live SSE log stream and its cancellation func.
+type subscribedMsg struct {
+	ch     <-chan ctl.Event
+	cancel context.CancelFunc
+}
+
+// logMsg carries one formatted kernel log line.
+type logMsg struct {
+	line string
+}
+
+// stateMsg carries a kernel state pushed over SSE.
+type stateMsg struct {
+	state supervisor.KernelState
+}
+
+// logClosedMsg fires when the SSE log stream ends.
+type logClosedMsg struct{}
+
+// Init returns the initial commands: fetch kernel status, poll it every
+// second and subscribe to the SSE log stream.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		fetchStatusCmd(m.client),
 		statusTick(),
+		subscribeCmd(m.client),
 	)
+}
+
+// subscribeCmd opens the SSE log subscription and hands the stream to the
+// model via subscribedMsg.
+func subscribeCmd(c *ctl.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithCancel(context.Background())
+		ch, err := c.SubscribeLogs(ctx)
+		if err != nil {
+			cancel()
+			return statusErrorMsg{err: err}
+		}
+		return subscribedMsg{ch: ch, cancel: cancel}
+	}
+}
+
+// forwardEventsCmd pumps one event from the stream into the message loop,
+// re-arming itself so the stream keeps flowing.
+func forwardEventsCmd(ch <-chan ctl.Event) tea.Cmd {
+	return func() tea.Msg {
+		ev, ok := <-ch
+		if !ok {
+			return logClosedMsg{}
+		}
+		if msg := parseLogEvent(ev); msg != nil {
+			return msg
+		}
+		return forwardEventsCmd(ch)()
+	}
+}
+
+// parseLogEvent decodes an SSE payload into a logMsg or stateMsg, or nil for
+// unknown event types.
+func parseLogEvent(ev ctl.Event) tea.Msg {
+	var header struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(ev.Data), &header); err != nil {
+		return nil
+	}
+	switch header.Type {
+	case "log":
+		var l supervisor.KernelLogLine
+		if err := json.Unmarshal([]byte(ev.Data), &l); err != nil {
+			return nil
+		}
+		return logMsg{line: formatLogLine(l)}
+	case "state":
+		var st supervisor.KernelState
+		if err := json.Unmarshal([]byte(ev.Data), &st); err != nil {
+			return nil
+		}
+		return stateMsg{state: st}
+	}
+	return nil
+}
+
+// formatLogLine renders a kernel log line as "2006-01-02 15:04:05 LEVEL  line".
+func formatLogLine(l supervisor.KernelLogLine) string {
+	level := "INFO "
+	if l.Stream == "stderr" {
+		level = errorStyle.Render("ERROR")
+	}
+	ts := time.UnixMilli(l.TS).Format("2006-01-02 15:04:05")
+	return fmt.Sprintf("%s %s  %s", ts, level, l.Line)
 }
 
 // fetchStatusCmd fetches the kernel status once.
@@ -78,6 +167,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.quitting = true
+			m.closeLogStream()
 			return m, tea.Quit
 		case "1", "2", "3":
 			m.activeTab = int(msg.String()[0] - '1')
@@ -87,6 +177,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.QuitMsg:
 		m.quitting = true
+		m.closeLogStream()
 		return m, nil
 	case statusLoadedMsg:
 		m.state = &msg.state
@@ -94,10 +185,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusErrorMsg:
 		m.err = msg.err
 		return m, nil
+	case subscribedMsg:
+		m.logCancel = msg.cancel
+		m.logCh = msg.ch
+		return m, forwardEventsCmd(msg.ch)
+	case logMsg:
+		m.logs.append(msg.line)
+		return m, forwardEventsCmd(m.logCh)
+	case stateMsg:
+		m.state = &msg.state
+		return m, forwardEventsCmd(m.logCh)
+	case logClosedMsg:
+		if !m.quitting {
+			m.err = fmt.Errorf("log stream closed")
+		}
+		return m, nil
 	case tickMsg:
 		return m, tea.Batch(fetchStatusCmd(m.client), statusTick())
 	}
 	return m, nil
+}
+
+// closeLogStream cancels the SSE subscription so its goroutine and HTTP
+// connection are released on exit.
+func (m *Model) closeLogStream() {
+	if m.logCancel != nil {
+		m.logCancel()
+		m.logCancel = nil
+	}
 }
 
 // View renders the framed layout: bordered box with a title, status bar, tab
@@ -114,8 +229,9 @@ func (m Model) View() string {
 	inner := w - 2
 
 	// The log viewport (or placeholder) fills everything between the fixed
-	// frame rows: top + status + sep + tab + sep + body + sep + help + bottom.
-	const frameRows = 8
+	// frame rows: top + status + tab + sep + body + sep + help + bottom.
+	// (Status and tab share the header area — no separator between them.)
+	const frameRows = 7
 	if h > frameRows {
 		m.logs.SetSize(inner, h-frameRows)
 	}
@@ -126,10 +242,12 @@ func (m Model) View() string {
 	}
 
 	title := " mihomo-tui · " + m.client.Endpoint() + " "
+	// TEMP diagnostic: show the resolved window size until the short-window
+	// report is confirmed — remove once verified.
+	size := fmt.Sprintf(" %dx%d ", w, h)
 	return strings.Join([]string{
-		frameTop(inner, title),
+		frameTop(inner, title, size),
 		frameRow(statusLine, inner),
-		frameSep(inner),
 		frameRow(renderTabs(m.activeTab), inner),
 		frameSep(inner),
 		m.body(inner, h-frameRows),
@@ -167,10 +285,11 @@ const (
 	minHeight = 10
 )
 
-// frameTop renders the top border with the title embedded on the left.
-func frameTop(inner int, title string) string {
-	mid := strings.Repeat("─", max(0, inner-2-lipgloss.Width(title)))
-	return "┌─" + title + mid + "─┐"
+// frameTop renders the top border with the title embedded on the left and an
+// optional right-side label (e.g. window size).
+func frameTop(inner int, title, right string) string {
+	mid := strings.Repeat("─", max(0, inner-2-lipgloss.Width(title)-lipgloss.Width(right)))
+	return "┌─" + title + mid + right + "─┐"
 }
 
 // frameSep renders an internal separator line.

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"regexp"
 	"strings"
 	"testing"
 
@@ -11,9 +10,6 @@ import (
 
 	"metacubexd-server-go/internal/ctl"
 )
-
-// ansiRe strips SGR escape sequences so layout assertions ignore colors.
-var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // TestViewLayout verifies the full layout renders the status bar, the tab bar
 // and the help line.
