@@ -13,6 +13,12 @@ var (
 	statusErrored = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	statusBusy    = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	statusStopped = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	// errorStyle marks inline error messages on the status line.
+	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+
+	// tabActiveStyle highlights the active tab in the tab bar.
+	tabActiveStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 )
 
 // statusStyle returns the color style for a kernel status.
