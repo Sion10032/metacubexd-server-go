@@ -31,6 +31,13 @@ func main() {
 	flag.Parse()
 
 	client := ctl.NewClient(*endpoint, *token, *insecure)
+
+	// Probe the control API before entering the TUI so a wrong endpoint or
+	// missing auth fails fast with a clear message instead of a blank screen.
+	if _, err := client.KernelStatus(); err != nil {
+		log.Fatalf("mihomo-tui: cannot reach %s: %v", *endpoint, err)
+	}
+
 	if _, err := tea.NewProgram(tui.New(client)).Run(); err != nil {
 		log.Fatalf("mihomo-tui: %v", err)
 	}
