@@ -1,6 +1,10 @@
 package tui
 
 import (
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -58,5 +62,152 @@ func TestProfilesTabLoaded(t *testing.T) {
 	got := ansiRe.ReplaceAllString(nm.View(), "")
 	if !strings.Contains(got, "sub") || !strings.Contains(got, "●") {
 		t.Errorf("profiles tab missing table content:\n%s", got)
+	}
+}
+
+// TestProfileActivateKey verifies a activates the selected profile and marks
+// it active.
+func TestProfileActivateKey(t *testing.T) {
+	var gotURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.Method + " " + r.RequestURI
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"starting"}`)
+	}))
+	defer srv.Close()
+
+	m := New(ctl.NewClient(srv.URL, "", false))
+	nm, _ := m.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")}) // Profiles tab
+
+	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	if cmd == nil {
+		t.Fatal("a returned no command")
+	}
+	if nm.(Model).profActive != "b" {
+		t.Errorf("profActive = %q, want b", nm.(Model).profActive)
+	}
+	if _, ok := cmd().(profileOpMsg); !ok {
+		t.Fatalf("cmd returned %T, want profileOpMsg", cmd())
+	}
+	if want := "POST /api/control/profiles/b/activate"; gotURI != want {
+		t.Errorf("request = %q, want %q", gotURI, want)
+	}
+}
+
+// TestProfileRefreshKey verifies u refreshes the selected profile.
+func TestProfileRefreshKey(t *testing.T) {
+	var gotURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.Method + " " + r.RequestURI
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"b","name":"sub","type":"remote","updatedAt":2}`)
+	}))
+	defer srv.Close()
+
+	m := New(ctl.NewClient(srv.URL, "", false))
+	nm, _ := m.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+
+	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	if cmd == nil {
+		t.Fatal("u returned no command")
+	}
+	cmd()
+	if want := "POST /api/control/profiles/b/refresh"; gotURI != want {
+		t.Errorf("request = %q, want %q", gotURI, want)
+	}
+}
+
+// TestProfileDeleteConfirm verifies d asks for confirmation and y deletes.
+func TestProfileDeleteConfirm(t *testing.T) {
+	var gotURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.Method + " " + r.RequestURI
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[{"id":"b","name":"sub","type":"remote","updatedAt":1}]`)
+	}))
+	defer srv.Close()
+
+	m := New(ctl.NewClient(srv.URL, "", false))
+	nm, _ := m.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+
+	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if cmd != nil {
+		t.Fatal("d should enter confirm state, not issue a command")
+	}
+	if !nm.(Model).confirmDel {
+		t.Fatal("confirmDel should be true after d")
+	}
+	if got := nm.View(); !strings.Contains(got, "删除所选 profile") {
+		t.Errorf("View missing delete prompt:\n%s", got)
+	}
+
+	nm, cmd = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if cmd == nil {
+		t.Fatal("y returned no command")
+	}
+	cmd()
+	if want := "DELETE /api/control/profiles/b"; gotURI != want {
+		t.Errorf("request = %q, want %q", gotURI, want)
+	}
+
+	// Any other key cancels without issuing a request.
+	gotURI = ""
+	nm, _ = nm.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	nm, cmd = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if cmd != nil {
+		t.Fatal("cancelling should not issue a command")
+	}
+	if gotURI != "" {
+		t.Errorf("unexpected request after cancel: %q", gotURI)
+	}
+	if nm.(Model).confirmDel {
+		t.Error("confirmDel should reset after cancel")
+	}
+}
+
+// TestProfileImportInput verifies i opens URL input and enter imports it.
+func TestProfileImportInput(t *testing.T) {
+	var gotURI, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.Method + " " + r.RequestURI
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"new","name":"","type":"remote","updatedAt":1}`)
+	}))
+	defer srv.Close()
+
+	m := New(ctl.NewClient(srv.URL, "", false))
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")}) // Profiles tab
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	if !nm.(Model).importing {
+		t.Fatal("importing should be true after i")
+	}
+
+	for _, r := range "https://example.com/sub" {
+		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+	}
+	if got := nm.(Model).importURL; got != "https://example.com/sub" {
+		t.Errorf("importURL = %q, want the typed URL", got)
+	}
+
+	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter returned no command")
+	}
+	cmd()
+	if want := "POST /api/control/profiles/import"; gotURI != want {
+		t.Errorf("request = %q, want %q", gotURI, want)
+	}
+	if !strings.Contains(gotBody, "https://example.com/sub") {
+		t.Errorf("body = %q, want the URL", gotBody)
 	}
 }

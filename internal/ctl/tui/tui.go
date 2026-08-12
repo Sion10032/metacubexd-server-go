@@ -28,6 +28,9 @@ type Model struct {
 	logs        LogsModel
 	profiles    ProfilesModel
 	profActive  string
+	importing   bool
+	importURL   string
+	confirmDel  bool
 	activeTab   int
 	kSelected   int
 	kConfirming bool
@@ -88,6 +91,12 @@ type profilesLoadedMsg struct {
 	err  error
 }
 
+// profileOpMsg carries the result of a profile operation; a nil err means the
+// lists and kernel status should be refreshed.
+type profileOpMsg struct {
+	err error
+}
+
 // Init returns the initial commands: fetch kernel status, poll it every
 // second, subscribe to the SSE log stream and load the profile list.
 func (m Model) Init() tea.Cmd {
@@ -104,6 +113,59 @@ func fetchProfilesCmd(c *ctl.Client) tea.Cmd {
 	return func() tea.Msg {
 		list, err := c.ProfilesList()
 		return profilesLoadedMsg{list: list, err: err}
+	}
+}
+
+// profileOpCmd runs a profile operation; on success the caller refreshes the
+// lists via profileOpMsg.
+func profileOpCmd(c *ctl.Client, op func() error) tea.Cmd {
+	return func() tea.Msg {
+		if err := op(); err != nil {
+			return profileOpMsg{err: err}
+		}
+		return profileOpMsg{}
+	}
+}
+
+// updateImport handles the import-URL input state: enter imports, esc
+// cancels, backspace deletes; other printable keys (including pasted runs)
+// append.
+func (m Model) updateImport(key string) (Model, tea.Cmd) {
+	switch key {
+	case "enter":
+		url := m.importURL
+		m.importing = false
+		m.importURL = ""
+		if url == "" {
+			return m, nil
+		}
+		return m, importCmd(m.client, url)
+	case "esc":
+		m.importing = false
+		m.importURL = ""
+	case "backspace":
+		if r := []rune(m.importURL); len(r) > 0 {
+			m.importURL = string(r[:len(r)-1])
+		}
+	default:
+		// Skip navigation/control keys; accept anything else (URL chars,
+		// including a pasted run).
+		switch key {
+		case "tab", "shift+tab", "up", "down", "left", "right", "pgup", "pgdown", "home", "end":
+		default:
+			m.importURL += key
+		}
+	}
+	return m, nil
+}
+
+// importCmd imports a subscription URL into a new profile.
+func importCmd(c *ctl.Client, url string) tea.Cmd {
+	return func() tea.Msg {
+		if _, err := c.ProfileImport(url, ""); err != nil {
+			return profileOpMsg{err: err}
+		}
+		return profileOpMsg{}
 	}
 }
 
@@ -199,6 +261,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.updateFilter(key)
 			return m, nil
 		}
+		if m.importing {
+			var cmd tea.Cmd
+			m, cmd = m.updateImport(key)
+			return m, cmd
+		}
+		if m.confirmDel {
+			m.confirmDel = false
+			if key == "y" || key == "Y" {
+				id := m.profiles.SelectedID()
+				if id != "" {
+					return m, profileOpCmd(m.client, func() error {
+						return m.client.ProfileDelete(id)
+					})
+				}
+			}
+			return m, nil
+		}
 		switch key {
 		case "q", "ctrl+c":
 			m.quitting = true
@@ -216,6 +295,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "f":
 			if m.activeTab == 0 {
 				m.logs.follow = !m.logs.follow
+			}
+		case "a":
+			if m.activeTab == 1 {
+				if id := m.profiles.SelectedID(); id != "" {
+					m.profActive = id
+					return m, profileOpCmd(m.client, func() error {
+						_, err := m.client.ProfileActivate(id)
+						return err
+					})
+				}
+			}
+		case "u":
+			if m.activeTab == 1 {
+				if id := m.profiles.SelectedID(); id != "" {
+					return m, profileOpCmd(m.client, func() error {
+						_, err := m.client.ProfileRefresh(id)
+						return err
+					})
+				}
+			}
+		case "d":
+			if m.activeTab == 1 && m.profiles.SelectedID() != "" {
+				m.confirmDel = true
+			}
+		case "i":
+			if m.activeTab == 1 {
+				m.importing = true
+				m.importURL = ""
 			}
 		default:
 			// Config tab: up/down/enter drive kernel selection; other keys (and
@@ -297,6 +404,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.profiles.SetProfiles(msg.list, m.profActive)
 		return m, nil
+	case profileOpMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		// Refresh the list (updated timestamps, imported/deleted entries) and
+		// the kernel status (activate restarts the kernel).
+		return m, tea.Batch(fetchProfilesCmd(m.client), fetchStatusCmd(m.client))
 	case tickMsg:
 		return m, tea.Batch(fetchStatusCmd(m.client), statusTick())
 	}
@@ -439,9 +554,14 @@ func (m Model) View() string {
 	// report is confirmed — remove once verified.
 	size := fmt.Sprintf(" %dx%d ", w, h)
 	help := helpLine
-	if m.filtering {
+	switch {
+	case m.filtering:
 		help = "filter: " + m.filterInput + "▌  (enter:apply  esc:cancel)"
-	} else {
+	case m.importing:
+		help = "import URL: " + m.importURL + "▌  (enter:import  esc:cancel)"
+	case m.confirmDel:
+		help = "⚠ 删除所选 profile? (y 确认 / 其他取消)"
+	default:
 		// Surface the follow-at-bottom state on the help line.
 		flag := "ON"
 		if !m.logs.follow {
