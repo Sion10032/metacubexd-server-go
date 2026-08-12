@@ -36,6 +36,11 @@ func NewClient(endpoint, token string, insecure bool) *Client {
 	}
 }
 
+// Endpoint returns the configured server endpoint URL.
+func (c *Client) Endpoint() string {
+	return c.endpoint
+}
+
 // do performs a request against endpoint+path, attaching the bearer token
 // (when configured) and requesting JSON. The caller must close the returned
 // response body.
