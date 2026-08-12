@@ -3,6 +3,7 @@
 package ctl
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"metacubexd-server-go/internal/profile"
 	"metacubexd-server-go/internal/supervisor"
 )
 
@@ -88,6 +90,89 @@ func decodeState(resp *http.Response) (supervisor.KernelState, error) {
 		return st, errors.New(msg)
 	}
 	return st, nil
+}
+
+// doJSON performs a request and decodes a JSON response, surfacing the
+// {"error": ...} message on non-2xx responses.
+func (c *Client) doJSON(method, path string, body io.Reader, out any) error {
+	resp, err := c.do(method, path, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var e struct {
+			Error string `json:"error"`
+		}
+		if derr := json.NewDecoder(resp.Body).Decode(&e); derr == nil && e.Error != "" {
+			return errors.New(e.Error)
+		}
+		return errors.New(resp.Status)
+	}
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
+	}
+	return nil
+}
+
+// ProfilesList fetches all profiles.
+func (c *Client) ProfilesList() ([]profile.Meta, error) {
+	var list []profile.Meta
+	if err := c.doJSON(http.MethodGet, "/api/control/profiles", nil, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// ProfileImport fetches a remote subscription URL into a new profile.
+func (c *Client) ProfileImport(url, name string) (profile.Meta, error) {
+	var m profile.Meta
+	body, err := json.Marshal(struct {
+		URL  string `json:"url"`
+		Name string `json:"name"`
+	}{url, name})
+	if err != nil {
+		return m, err
+	}
+	if err := c.doJSON(http.MethodPost, "/api/control/profiles/import", bytes.NewReader(body), &m); err != nil {
+		return m, err
+	}
+	return m, nil
+}
+
+// ProfileRefresh re-fetches a subscription profile in place.
+func (c *Client) ProfileRefresh(id string) (profile.Meta, error) {
+	var m profile.Meta
+	if err := c.doJSON(http.MethodPost, "/api/control/profiles/"+id+"/refresh", nil, &m); err != nil {
+		return m, err
+	}
+	return m, nil
+}
+
+// ProfileRefreshAndActivate refreshes a profile and activates it, restarting
+// the kernel.
+func (c *Client) ProfileRefreshAndActivate(id string) (profile.Meta, error) {
+	var out struct {
+		Meta profile.Meta `json:"meta"`
+	}
+	if err := c.doJSON(http.MethodPost, "/api/control/profiles/"+id+"/refresh-and-activate", nil, &out); err != nil {
+		return profile.Meta{}, err
+	}
+	return out.Meta, nil
+}
+
+// ProfileActivate activates a profile and restarts the kernel.
+func (c *Client) ProfileActivate(id string) (supervisor.KernelState, error) {
+	var st supervisor.KernelState
+	if err := c.doJSON(http.MethodPost, "/api/control/profiles/"+id+"/activate", nil, &st); err != nil {
+		return st, err
+	}
+	return st, nil
+}
+
+// ProfileDelete removes a profile.
+func (c *Client) ProfileDelete(id string) error {
+	return c.doJSON(http.MethodDelete, "/api/control/profiles/"+id, nil, nil)
 }
 
 // KernelStart starts the kernel and returns the new state.
