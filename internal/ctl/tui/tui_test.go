@@ -32,12 +32,12 @@ func TestTabSwitch(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 
 	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
-	if got := nm.View(); !strings.Contains(got, "Profiles tab — not implemented yet") {
-		t.Errorf("View after tab 2 = %q, want Profiles placeholder", got)
+	if got := nm.View(); !strings.Contains(got, "Name") {
+		t.Errorf("View after tab 2 = %q, want profiles table", got)
 	}
 
 	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
-	if got := nm.View(); strings.Contains(got, "not implemented yet") {
+	if got := nm.View(); !strings.Contains(got, "waiting for log stream") && !strings.Contains(got, "[1] Logs") {
 		t.Errorf("View after tab 1 = %q, want log viewport", got)
 	}
 }

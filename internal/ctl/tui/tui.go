@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/profile"
 	"metacubexd-server-go/internal/supervisor"
 )
 
@@ -25,6 +26,8 @@ type Model struct {
 	state       *supervisor.KernelState
 	err         error
 	logs        LogsModel
+	profiles    ProfilesModel
+	profActive  string
 	activeTab   int
 	kSelected   int
 	kConfirming bool
@@ -44,7 +47,7 @@ func New(client *ctl.Client) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	return Model{client: client, logs: NewLogsModel(), spinner: s}
+	return Model{client: client, logs: NewLogsModel(), profiles: NewProfilesModel(), spinner: s}
 }
 
 // statusLoadedMsg carries a fresh kernel state from the control API.
@@ -79,14 +82,29 @@ type stateMsg struct {
 // logClosedMsg fires when the SSE log stream ends.
 type logClosedMsg struct{}
 
+// profilesLoadedMsg carries the fetched profile list.
+type profilesLoadedMsg struct {
+	list []profile.Meta
+	err  error
+}
+
 // Init returns the initial commands: fetch kernel status, poll it every
-// second and subscribe to the SSE log stream.
+// second, subscribe to the SSE log stream and load the profile list.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		fetchStatusCmd(m.client),
 		statusTick(),
 		subscribeCmd(m.client),
+		fetchProfilesCmd(m.client),
 	)
+}
+
+// fetchProfilesCmd loads the profile list once.
+func fetchProfilesCmd(c *ctl.Client) tea.Cmd {
+	return func() tea.Msg {
+		list, err := c.ProfilesList()
+		return profilesLoadedMsg{list: list, err: err}
+	}
 }
 
 // subscribeCmd opens the SSE log subscription and hands the stream to the
@@ -213,6 +231,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil // consumed by kernel selection
 				}
 			}
+			// Profiles tab: selection keys drive the table; scroll keys fall
+			// through to the log viewport below.
+			if m.activeTab == 1 {
+				m.profiles.Update(msg)
+				if key == "up" || key == "down" || key == "enter" {
+					return m, nil // consumed by the table
+				}
+			}
 			// Scroll keys (PgUp/PgDn/arrows) reach the log viewport on any tab.
 			m.logs.Update(msg)
 		}
@@ -263,6 +289,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.quitting {
 			m.err = fmt.Errorf("log stream closed")
 		}
+		return m, nil
+	case profilesLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.profiles.SetProfiles(msg.list, m.profActive)
 		return m, nil
 	case tickMsg:
 		return m, tea.Batch(fetchStatusCmd(m.client), statusTick())
@@ -398,6 +431,9 @@ func (m Model) View() string {
 		statusLine += "  " + m.spinner.View() + " " + kernelOps[m.kSelected].label + "…"
 	}
 
+	// Second status line: the active profile summary.
+	activeLine := m.profiles.ActiveSummary(m.profActive)
+
 	title := " mihomo-tui · " + m.client.Endpoint() + " "
 	// TEMP diagnostic: show the resolved window size until the short-window
 	// report is confirmed — remove once verified.
@@ -416,6 +452,7 @@ func (m Model) View() string {
 	return strings.Join([]string{
 		frameTop(inner, title, size),
 		frameRow(statusLine, inner),
+		frameRow(activeLine, inner),
 		frameRow(renderTabs(m.activeTab), inner),
 		frameSep(inner),
 		m.body(inner, h-frameRows),
@@ -444,6 +481,9 @@ func (m Model) body(width, height int) string {
 	switch m.activeTab {
 	case 0:
 		content = m.logs.View()
+	case 1:
+		m.profiles.SetSize(width, height)
+		content = m.profiles.View()
 	case 2:
 		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(renderKernelTab(m.state, m.kSelected, m.err, m.kConfirming))
 	default:
@@ -465,13 +505,13 @@ func (m Model) body(width, height int) string {
 
 // Minimum frame dimensions, the narrow-screen threshold below which the
 // frame is dropped in favor of a bare log stream, and the number of fixed
-// rows (top + status + tab + sep + body + sep + help + bottom) the log
+// rows (top + 2 status + tab + sep + body + sep + help + bottom) the log
 // viewport must leave room for.
 const (
 	minWidth    = 40
 	minHeight   = 10
 	narrowWidth = 60
-	frameRows   = 7
+	frameRows   = 8
 )
 
 // frameTop renders the top border with the title embedded on the left and an
