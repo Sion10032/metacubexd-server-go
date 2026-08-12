@@ -67,17 +67,47 @@ func TestLogsAppend(t *testing.T) {
 
 	l.append("line one")
 	l.append("line two")
-	if len(l.lines) != 2 {
-		t.Fatalf("lines = %d, want 2", len(l.lines))
+	if len(l.allLines) != 2 {
+		t.Fatalf("lines = %d, want 2", len(l.allLines))
 	}
 	if got := l.View(); !strings.Contains(got, "line two") {
 		t.Errorf("viewport view = %q, missing line two", got)
 	}
 
-	l.filter = "two"
+	// Filtering only affects the view, never the history.
+	l.SetFilter("two")
 	l.append("line three")
-	if len(l.lines) != 2 {
-		t.Errorf("lines after filter = %d, want 2 (filtered line dropped)", len(l.lines))
+	if len(l.allLines) != 3 {
+		t.Errorf("history = %d, want 3 (filter never drops lines)", len(l.allLines))
+	}
+	if got := l.View(); strings.Contains(got, "line one") {
+		t.Errorf("filtered view still shows non-matching line: %q", got)
+	}
+}
+
+// TestFilterClearRestores verifies clearing the filter brings back the full
+// history that was hidden while the filter was active.
+func TestFilterClearRestores(t *testing.T) {
+	l := NewLogsModel()
+	l.SetSize(80, 10)
+	l.append("info: one")
+	l.append("error: two")
+	l.append("info: three")
+
+	l.SetFilter("error")
+	if got := l.View(); strings.Contains(got, "info:") {
+		t.Errorf("filtered view shows info lines: %q", got)
+	}
+
+	l.SetFilter("")
+	if len(l.allLines) != 3 {
+		t.Errorf("history = %d, want 3 after clear", len(l.allLines))
+	}
+	got := l.View()
+	for _, want := range []string{"info: one", "error: two", "info: three"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("view after clear missing %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -87,11 +117,189 @@ func TestLogsCap(t *testing.T) {
 	for i := 0; i < maxLogLines+50; i++ {
 		l.append(fmt.Sprintf("line %d", i))
 	}
-	if len(l.lines) != maxLogLines {
-		t.Errorf("lines = %d, want cap %d", len(l.lines), maxLogLines)
+	if len(l.allLines) != maxLogLines {
+		t.Errorf("lines = %d, want cap %d", len(l.allLines), maxLogLines)
 	}
-	if l.lines[0] != "line 50" || l.lines[len(l.lines)-1] != fmt.Sprintf("line %d", maxLogLines+49) {
-		t.Errorf("kept window wrong: first=%q last=%q", l.lines[0], l.lines[len(l.lines)-1])
+	if l.allLines[0] != "line 50" || l.allLines[len(l.allLines)-1] != fmt.Sprintf("line %d", maxLogLines+49) {
+		t.Errorf("kept window wrong: first=%q last=%q", l.allLines[0], l.allLines[len(l.allLines)-1])
+	}
+}
+
+// TestFilterInput verifies / enters filter mode, typing + enter applies the
+// filter and esc cancels without changing it.
+func TestFilterInput(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	if !nm.(Model).filtering {
+		t.Fatal("filtering should be true after /")
+	}
+
+	for _, r := range "err" {
+		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+	}
+	if got := nm.(Model).filterInput; got != "err" {
+		t.Errorf("filterInput = %q, want err", got)
+	}
+
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mdl := nm.(Model)
+	if mdl.filtering || mdl.logs.filter != "err" {
+		t.Errorf("after enter: filtering=%v filter=%q", mdl.filtering, mdl.logs.filter)
+	}
+
+	// Re-entering prefills the current filter so it can be edited or cleared.
+	nm, _ = mdl.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	if got := nm.(Model).filterInput; got != "err" {
+		t.Errorf("filterInput after / = %q, want prefilled err", got)
+	}
+
+	// Delete to empty and enter clears the filter.
+	for i := 0; i < 3; i++ {
+		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	}
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mdl = nm.(Model)
+	if mdl.logs.filter != "" {
+		t.Errorf("filter after clear = %q, want empty", mdl.logs.filter)
+	}
+	if mdl.filtering {
+		t.Error("filtering should be false after applying")
+	}
+
+	// backspace deletes one character from a fresh input.
+	nm, _ = mdl.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	if got := nm.(Model).filterInput; got != "" {
+		t.Errorf("filterInput after backspace = %q, want empty", got)
+	}
+
+	// esc cancels without applying.
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mdl = nm.(Model)
+	if mdl.filtering || mdl.logs.filter != "" {
+		t.Errorf("after esc: filtering=%v filter=%q (should keep empty)", mdl.filtering, mdl.logs.filter)
+	}
+}
+
+// TestFilterAppliesToHistory verifies setting a filter rebuilds the viewport
+// content, filtering lines that arrived before the filter was applied.
+func TestFilterAppliesToHistory(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	nm, _ = nm.Update(logMsg{line: "info: normal line"})
+	nm, _ = nm.Update(logMsg{line: "error: bad thing"})
+
+	// Apply a filter through the input flow.
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	for _, r := range "error" {
+		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+	}
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	mdl := nm.(Model)
+	if mdl.logs.filter != "error" {
+		t.Fatalf("filter = %q, want error", mdl.logs.filter)
+	}
+	if len(mdl.logs.allLines) != 2 {
+		t.Errorf("history = %d, want 2 (full history retained)", len(mdl.logs.allLines))
+	}
+	if got := mdl.View(); strings.Contains(got, "normal line") {
+		t.Errorf("View still shows filtered-out history:\n%s", got)
+	}
+}
+
+// TestMouseWheelScroll verifies wheel events reach the log viewport so the
+// terminal buffer is not scrolled instead.
+func TestMouseWheelScroll(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	mdl := nm.(Model)
+	mdl.logs.follow = false
+	nm = mdl
+	for i := 0; i < 50; i++ {
+		nm, _ = nm.Update(logMsg{line: fmt.Sprintf("scroll line %d", i)})
+	}
+
+	nm, _ = nm.Update(tea.MouseMsg{Type: tea.MouseWheelDown, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	if got := nm.(Model).logs.viewport.YOffset; got <= 0 {
+		t.Errorf("wheel down did not scroll (YOffset=%d)", got)
+	}
+}
+
+// TestFollowToggle verifies f flips the follow-at-bottom flag.
+func TestFollowToggle(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	if !m.logs.follow {
+		t.Fatal("follow should default to true")
+	}
+
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	if nm.(Model).logs.follow {
+		t.Error("follow should be false after f")
+	}
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	if !nm.(Model).logs.follow {
+		t.Error("follow should be true after f again")
+	}
+}
+
+// TestFollowIndicator verifies the help line shows the follow state.
+func TestFollowIndicator(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	if got := m.View(); !strings.Contains(got, "f:follow(ON)") {
+		t.Errorf("View = %q, want follow(ON)", got)
+	}
+
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	if got := nm.View(); !strings.Contains(got, "f:follow(OFF)") {
+		t.Errorf("View = %q, want follow(OFF)", got)
+	}
+}
+
+// TestScrollOnEveryTab verifies PgDn scrolls the log viewport from any tab.
+func TestScrollOnEveryTab(t *testing.T) {
+	for _, tab := range []string{"1", "2", "3"} {
+		t.Run("tab "+tab, func(t *testing.T) {
+			m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+			nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			mdl := nm.(Model)
+			mdl.logs.follow = false
+			nm = mdl
+			for i := 0; i < 50; i++ {
+				nm, _ = nm.Update(logMsg{line: fmt.Sprintf("scroll line %d", i)})
+			}
+			nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tab)})
+
+			nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+			mdl = nm.(Model)
+			if mdl.logs.viewport.YOffset == 0 {
+				t.Errorf("PgDn on tab %s did not scroll the log viewport (YOffset=0)", tab)
+			}
+		})
+	}
+}
+
+// TestViewportScroll verifies PgDn is forwarded to the log viewport.
+func TestViewportScroll(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	mdl := nm.(Model)
+	mdl.logs.follow = false // inspect the scroll position
+	nm = mdl
+	for i := 0; i < 50; i++ {
+		nm, _ = nm.Update(logMsg{line: fmt.Sprintf("scroll line %d", i)})
+	}
+
+	if got := nm.View(); !strings.Contains(got, "scroll line 0") {
+		t.Errorf("initial view missing first line:\n%s", got)
+	}
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	got := nm.View()
+	if strings.Contains(got, "scroll line 0") || !strings.Contains(got, "scroll line 17") {
+		t.Errorf("PgDn did not scroll the viewport:\n%s", got)
 	}
 }
 

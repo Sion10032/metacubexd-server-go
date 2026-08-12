@@ -38,7 +38,9 @@ func main() {
 		log.Fatalf("mihomo-tui: cannot reach %s: %v", *endpoint, err)
 	}
 
-	if _, err := tea.NewProgram(tui.New(client)).Run(); err != nil {
+	// Mouse support lets the program capture wheel events and scroll the log
+	// viewport instead of the terminal scrolling its own buffer.
+	if _, err := tea.NewProgram(tui.New(client), tea.WithMouseCellMotion()).Run(); err != nil {
 		log.Fatalf("mihomo-tui: %v", err)
 	}
 }

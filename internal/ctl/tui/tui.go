@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,20 +21,22 @@ import (
 // Model is the top-level Bubble Tea model. It owns the kernel state, the log
 // viewport and the current tab.
 type Model struct {
-	client     *ctl.Client
-	state      *supervisor.KernelState
-	err        error
-	logs       LogsModel
-	activeTab  int
-	kSelected  int
+	client      *ctl.Client
+	state       *supervisor.KernelState
+	err         error
+	logs        LogsModel
+	activeTab   int
+	kSelected   int
 	kConfirming bool
-	operating  bool
-	spinner    spinner.Model
-	width      int
-	height     int
-	logCh      <-chan ctl.Event
-	logCancel  context.CancelFunc
-	quitting   bool
+	operating   bool
+	spinner     spinner.Model
+	filtering   bool
+	filterInput string
+	width       int
+	height      int
+	logCh       <-chan ctl.Event
+	logCancel   context.CancelFunc
+	quitting    bool
 }
 
 // New returns a Model for the given control API client.
@@ -174,6 +177,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		key := msg.String()
+		if m.filtering {
+			m = m.updateFilter(key)
+			return m, nil
+		}
 		switch key {
 		case "q", "ctrl+c":
 			m.quitting = true
@@ -181,17 +188,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "1", "2", "3":
 			m.activeTab = int(key[0] - '1')
+		case "/":
+			if m.activeTab == 0 {
+				m.filtering = true
+				// Prefill with the current filter so it is editable and can be
+				// cleared by deleting to empty and pressing enter.
+				m.filterInput = m.logs.filter
+			}
+		case "f":
+			if m.activeTab == 0 {
+				m.logs.follow = !m.logs.follow
+			}
 		default:
+			// Config tab: up/down/enter drive kernel selection; other keys (and
+			// PgUp/PgDn everywhere) fall through to the log viewport so scrolling
+			// works on every tab.
 			if m.activeTab == 2 {
 				var cmd tea.Cmd
 				m, cmd = m.updateKernelKeys(key)
 				if cmd != nil {
 					return m, cmd
 				}
+				if key == "up" || key == "down" {
+					return m, nil // consumed by kernel selection
+				}
 			}
+			// Scroll keys (PgUp/PgDn/arrows) reach the log viewport on any tab.
+			m.logs.Update(msg)
 		}
+	case tea.MouseMsg:
+		// Wheel events scroll the log viewport; capturing them here keeps the
+		// terminal from scrolling its own buffer (which would reveal content
+		// from before the TUI started).
+		m.logs.Update(msg)
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		if msg.Height > frameRows {
+			m.logs.SetSize(msg.Width-2, msg.Height-frameRows)
+		}
 		return m, nil
 	case tea.QuitMsg:
 		m.quitting = true
@@ -242,6 +277,29 @@ func (m *Model) closeLogStream() {
 		m.logCancel()
 		m.logCancel = nil
 	}
+}
+
+// updateFilter handles the filter input state: enter applies, esc cancels,
+// backspace deletes, other single characters append.
+func (m Model) updateFilter(key string) Model {
+	switch key {
+	case "enter":
+		m.logs.SetFilter(m.filterInput)
+		m.filterInput = ""
+		m.filtering = false
+	case "esc":
+		m.filterInput = ""
+		m.filtering = false
+	case "backspace":
+		if r := []rune(m.filterInput); len(r) > 0 {
+			m.filterInput = string(r[:len(r)-1])
+		}
+	default:
+		if utf8.RuneCountInString(key) == 1 {
+			m.filterInput += key
+		}
+	}
+	return m
 }
 
 // kernelOpCmd runs a kernel operation via the client and pushes the fresh
@@ -325,9 +383,8 @@ func (m Model) View() string {
 	inner := w - 2
 
 	// The log viewport (or placeholder) fills everything between the fixed
-	// frame rows: top + status + tab + sep + body + sep + help + bottom.
-	// (Status and tab share the header area — no separator between them.)
-	const frameRows = 7
+	// frame rows. SetSize here is a belt-and-suspenders re-scroll; the size is
+	// applied on WindowSizeMsg so the model's viewport is always current.
 	if h > frameRows {
 		m.logs.SetSize(inner, h-frameRows)
 	}
@@ -344,6 +401,17 @@ func (m Model) View() string {
 	// TEMP diagnostic: show the resolved window size until the short-window
 	// report is confirmed — remove once verified.
 	size := fmt.Sprintf(" %dx%d ", w, h)
+	help := helpLine
+	if m.filtering {
+		help = "filter: " + m.filterInput + "▌  (enter:apply  esc:cancel)"
+	} else {
+		// Surface the follow-at-bottom state on the help line.
+		flag := "ON"
+		if !m.logs.follow {
+			flag = "OFF"
+		}
+		help = strings.Replace(helpLine, "f:follow", "f:follow("+flag+")", 1)
+	}
 	return strings.Join([]string{
 		frameTop(inner, title, size),
 		frameRow(statusLine, inner),
@@ -351,7 +419,7 @@ func (m Model) View() string {
 		frameSep(inner),
 		m.body(inner, h-frameRows),
 		frameSep(inner),
-		frameRow(helpLine, inner),
+		frameRow(help, inner),
 		frameBottom(inner),
 	}, "\n")
 }
@@ -394,12 +462,15 @@ func (m Model) body(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// Minimum frame dimensions and the narrow-screen threshold below which the
-// frame is dropped in favor of a bare log stream.
+// Minimum frame dimensions, the narrow-screen threshold below which the
+// frame is dropped in favor of a bare log stream, and the number of fixed
+// rows (top + status + tab + sep + body + sep + help + bottom) the log
+// viewport must leave room for.
 const (
 	minWidth    = 40
 	minHeight   = 10
 	narrowWidth = 60
+	frameRows   = 7
 )
 
 // frameTop renders the top border with the title embedded on the left and an
