@@ -13,6 +13,10 @@ import (
 	"metacubexd-server-go/internal/supervisor"
 )
 
+// ErrUnauthorized is returned when the control API rejects the credentials:
+// the server has auth enabled but the request carried no or an invalid token.
+var ErrUnauthorized = errors.New("unauthorized: token invalid or server requires auth")
+
 // Client talks to the metacubexd-server control API. It is safe for
 // concurrent use once created.
 type Client struct {
@@ -74,6 +78,9 @@ func decodeState(resp *http.Response) (supervisor.KernelState, error) {
 		return st, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if resp.StatusCode == http.StatusUnauthorized {
+			return st, ErrUnauthorized
+		}
 		msg := st.LastError
 		if msg == "" {
 			msg = resp.Status

@@ -4,6 +4,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -327,7 +328,7 @@ func (m Model) View() string {
 
 	statusLine := renderStatus(m.state, m.client.Endpoint())
 	if m.err != nil {
-		statusLine += "  " + errorStyle.Render("⚠ "+m.err.Error())
+		statusLine += "  " + errorStyle.Render("⚠ "+m.errText())
 	}
 	if m.operating {
 		statusLine += "  " + m.spinner.View() + " " + kernelOps[m.kSelected].label + "…"
@@ -347,6 +348,17 @@ func (m Model) View() string {
 		frameRow(helpLine, inner),
 		frameBottom(inner),
 	}, "\n")
+}
+
+// errText maps low-level errors to friendly status-bar text.
+func (m Model) errText() string {
+	if m.err == nil {
+		return ""
+	}
+	if errors.Is(m.err, ctl.ErrUnauthorized) {
+		return "认证失败：token 无效或 server 开启了认证"
+	}
+	return m.err.Error()
 }
 
 // body renders the active tab's content at the given size, wrapping every

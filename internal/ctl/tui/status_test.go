@@ -72,4 +72,10 @@ func TestViewStatusBar(t *testing.T) {
 	if got := nm.View(); !strings.Contains(got, "connection refused") {
 		t.Errorf("View with error = %q, want error message", got)
 	}
+
+	// A 401 shows the friendly auth hint instead of the raw error.
+	nm, _ = nm.Update(statusErrorMsg{err: ctl.ErrUnauthorized})
+	if got := nm.View(); !strings.Contains(got, "认证失败") {
+		t.Errorf("View with 401 = %q, want auth hint", got)
+	}
 }

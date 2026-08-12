@@ -1,6 +1,7 @@
 package ctl
 
 import (
+	"errors"
 	"context"
 	"fmt"
 	"net/http"
@@ -168,6 +169,21 @@ func TestKernelOps(t *testing.T) {
 				t.Errorf("%s: error = %q, want lastError message", op.name, err)
 			}
 		})
+	}
+}
+
+// TestUnauthorized verifies a 401 maps to ErrUnauthorized.
+func TestUnauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error":"unauthorized"}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "wrong-token", false)
+	if _, err := c.KernelStatus(); !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("KernelStatus error = %v, want ErrUnauthorized", err)
 	}
 }
 
