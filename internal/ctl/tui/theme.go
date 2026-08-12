@@ -25,6 +25,9 @@ var (
 
 	// tabActiveStyle highlights the active tab in the tab bar.
 	tabActiveStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
+
+	// selectedStyle highlights the selected entry in a list.
+	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 )
 
 // statusStyle returns the color style for a kernel status.

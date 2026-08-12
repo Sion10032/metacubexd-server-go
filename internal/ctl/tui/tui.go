@@ -23,6 +23,7 @@ type Model struct {
 	err       error
 	logs      LogsModel
 	activeTab int
+	kSelected int
 	width     int
 	height    int
 	logCh     <-chan ctl.Event
@@ -164,13 +165,22 @@ func statusTick() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
+		key := msg.String()
+		switch key {
 		case "q", "ctrl+c":
 			m.quitting = true
 			m.closeLogStream()
 			return m, tea.Quit
 		case "1", "2", "3":
-			m.activeTab = int(msg.String()[0] - '1')
+			m.activeTab = int(key[0] - '1')
+		default:
+			if m.activeTab == 2 {
+				var cmd tea.Cmd
+				m, cmd = m.updateKernelKeys(key)
+				if cmd != nil {
+					return m, cmd
+				}
+			}
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -213,6 +223,46 @@ func (m *Model) closeLogStream() {
 		m.logCancel()
 		m.logCancel = nil
 	}
+}
+
+// kernelOpCmd runs a kernel operation via the client and pushes the fresh
+// state, refreshing the status bar when done.
+func kernelOpCmd(c *ctl.Client, op func(*ctl.Client) (supervisor.KernelState, error)) tea.Cmd {
+	return func() tea.Msg {
+		st, err := op(c)
+		if err != nil {
+			return statusErrorMsg{err: err}
+		}
+		return statusLoadedMsg{state: st}
+	}
+}
+
+// kernelOps are the operations available on the Kernel tab, in selection
+// order.
+var kernelOps = []struct {
+	label string
+	op    func(*ctl.Client) (supervisor.KernelState, error)
+}{
+	{"Start", (*ctl.Client).KernelStart},
+	{"Stop", (*ctl.Client).KernelStop},
+	{"Restart", (*ctl.Client).KernelRestart},
+	{"Rollback", (*ctl.Client).KernelRollback},
+	{"Recover", (*ctl.Client).KernelRecover},
+}
+
+// updateKernelKeys handles selection and execution keys while the Kernel tab
+// is active.
+func (m Model) updateKernelKeys(key string) (Model, tea.Cmd) {
+	switch key {
+	case "up", "k":
+		m.kSelected = (m.kSelected + len(kernelOps) - 1) % len(kernelOps)
+	case "down", "j":
+		m.kSelected = (m.kSelected + 1) % len(kernelOps)
+	case "enter", " ":
+		op := kernelOps[m.kSelected]
+		return m, kernelOpCmd(m.client, op.op)
+	}
+	return m, nil
 }
 
 // View renders the framed layout: bordered box with a title, status bar, tab
@@ -265,6 +315,8 @@ func (m Model) body(width, height int) string {
 	switch m.activeTab {
 	case 0:
 		content = m.logs.View()
+	case 2:
+		content = renderKernelTab(m.state, m.kSelected, m.err)
 	default:
 		content = lipgloss.NewStyle().
 			Width(width).Height(height).
@@ -311,11 +363,34 @@ func frameRow(content string, inner int) string {
 	return "│" + lipgloss.PlaceHorizontal(inner, lipgloss.Left, content) + "│"
 }
 
+// renderKernelTab renders the kernel control section of the Config tab:
+// state summary, last error and the operation list with the selection
+// highlighted. Config editing (Phase 3) lands below this section.
+func renderKernelTab(state *supervisor.KernelState, selected int, err error) string {
+	lines := []string{renderStatus(state, "")}
+	if err != nil {
+		lines = append(lines, errorStyle.Render("⚠ "+err.Error()))
+	}
+	if state != nil && state.LastError != "" {
+		lines = append(lines, errorStyle.Render(state.LastError))
+	}
+	lines = append(lines, "", "kernel operations:")
+	for i, op := range kernelOps {
+		prefix, label := "  ", op.label
+		if i == selected {
+			prefix, label = "> ", selectedStyle.Render(op.label)
+		}
+		lines = append(lines, prefix+label)
+	}
+	lines = append(lines, "", lipgloss.NewStyle().Faint(true).Render("config editor — Phase 3"))
+	return strings.Join(lines, "\n")
+}
+
 // tabTitles are the tab names, one per index.
 var tabTitles = []string{"Logs", "Profiles", "Config"}
 
 // helpLine lists the key bindings.
-const helpLine = "s:start  S:stop  r:restart  R:rollback  c:recover  /:filter  f:follow  q:quit"
+const helpLine = "1-3:tabs  ↑↓:select  enter:run  /:filter  f:follow  q:quit"
 
 // renderTabs renders the tab bar, highlighting the active tab.
 func renderTabs(active int) string {

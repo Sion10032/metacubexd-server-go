@@ -19,7 +19,7 @@ func TestViewLayout(t *testing.T) {
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	got := ansiRe.ReplaceAllString(m.View(), "")
-	for _, want := range []string{"[1] Logs", "[2] Profiles", "[3] Config", "s:start", "q:quit"} {
+	for _, want := range []string{"[1] Logs", "[2] Profiles", "[3] Config", "enter:run", "q:quit"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("View = %q, missing %q", got, want)
 		}
