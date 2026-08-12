@@ -315,7 +315,8 @@ func kernelOpCmd(c *ctl.Client, op func(*ctl.Client) (supervisor.KernelState, er
 }
 
 // kernelOps are the operations available on the Config tab, in selection
-// order.
+// order. Rollback/Recover are commented out for now — destructive escape
+// hatches, re-enabled later.
 type kernelOp struct {
 	label string
 	op    func(*ctl.Client) (supervisor.KernelState, error)
@@ -325,13 +326,13 @@ var kernelOps = []kernelOp{
 	{"Start", (*ctl.Client).KernelStart},
 	{"Stop", (*ctl.Client).KernelStop},
 	{"Restart", (*ctl.Client).KernelRestart},
-	{"Rollback", (*ctl.Client).KernelRollback},
-	{"Recover", (*ctl.Client).KernelRecover},
+	// {"Rollback", (*ctl.Client).KernelRollback},
+	// {"Recover", (*ctl.Client).KernelRecover},
 }
 
-// updateKernelKeys handles selection, execution and the Recover confirmation
-// while the Config tab is active. Recover is destructive, so Enter on it
-// enters a confirm state where only "y" runs it.
+// updateKernelKeys handles selection and execution while the Config tab is
+// active. The Recover confirmation state (kConfirming) is kept for when
+// Recover is re-enabled.
 func (m Model) updateKernelKeys(key string) (Model, tea.Cmd) {
 	if m.kConfirming {
 		m.kConfirming = false

@@ -39,7 +39,7 @@ func TestKernelTabRender(t *testing.T) {
 
 	got := renderKernelTab(nil, 0, nil, false)
 	plain := ansiRe.ReplaceAllString(got, "")
-	for _, want := range []string{"Start", "Stop", "Restart", "Rollback", "Recover"} {
+	for _, want := range []string{"Start", "Stop", "Restart"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("kernel tab = %q, missing %q", plain, want)
 		}
@@ -94,9 +94,9 @@ func TestKernelTabExecute(t *testing.T) {
 	}
 }
 
-// TestRecoverConfirm verifies Enter on Recover asks for confirmation first,
-// "y" runs it and any other key cancels.
-func TestRecoverConfirm(t *testing.T) {
+// TestRecoverConfirm is disabled while Recover is commented out of the
+// operation list; re-enable when Recover returns.
+func _TestRecoverConfirm(t *testing.T) {
 	var gotURI string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotURI = r.Method + " " + r.RequestURI
