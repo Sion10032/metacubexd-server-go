@@ -3,8 +3,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
-	"unicode/utf8"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -65,115 +63,13 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
-// Update handles messages and key presses. Modal states (filter, import, edit,
-// config viewer) take priority over tab routing; the KernelModel owns the
-// Config tab's edit states and is queried for overlay decisions.
+// Update routes messages: key presses go through updateKey, mouse/window/
+// theme/quit messages are handled inline, and the remaining model messages
+// are dispatched to the owning sub model's update handler.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		key := msg.String()
-		switch {
-		case m.filtering:
-			m = m.updateFilter(key)
-			return m, nil
-		case m.importing:
-			var cmd tea.Cmd
-			m, cmd = m.updateImport(msg)
-			return m, cmd
-		case m.kernel.Editing():
-			var cmd tea.Cmd
-			m, cmd = m.kernel.updateEdit(msg, m)
-			return m, cmd
-		case m.kernel.EditingSection():
-			var cmd tea.Cmd
-			m, cmd = m.kernel.updateSectionForm(msg, m)
-			return m, cmd
-		case m.kernel.ViewingConfig():
-			var cmd tea.Cmd
-			m, cmd = m.kernel.updateConfig(msg, m)
-			return m, cmd
-		case m.confirmDel:
-			m.confirmDel = false
-			if key == "y" || key == "Y" {
-				id := m.profiles.SelectedID()
-				if id != "" {
-					return m, profileOpCmd(m.client, func() error {
-						return m.client.ProfileDelete(id)
-					})
-				}
-			}
-			return m, nil
-		default:
-			switch key {
-			case "q", "ctrl+c":
-				m.quitting = true
-				m.closeLogStream()
-				return m, tea.Quit
-			case "1", "2", "3":
-				m.activeTab = int(key[0] - '1')
-				if m.activeTab == 2 && !m.kernel.network.loaded {
-					return m, fetchNetworkSettingsCmd(m.client)
-				}
-			case "/":
-				if m.activeTab == 0 {
-					m.filtering = true
-					// Prefill with the current filter so it is editable and can be
-					// cleared by deleting to empty and pressing enter.
-					m.filterInput = m.logs.filter
-				}
-			case "f":
-				if m.activeTab == 0 {
-					m.logs.follow = !m.logs.follow
-				}
-			case "a":
-				if m.activeTab == 1 {
-					if id := m.profiles.SelectedID(); id != "" {
-						m.profActive = id
-						return m, profileOpCmd(m.client, func() error {
-							_, err := m.client.ProfileActivate(id)
-							return err
-						})
-					}
-				}
-			case "u":
-				if m.activeTab == 1 {
-					if id := m.profiles.SelectedID(); id != "" {
-						return m, profileOpCmd(m.client, func() error {
-							_, err := m.client.ProfileRefresh(id)
-							return err
-						})
-					}
-				}
-			case "d":
-				if m.activeTab == 1 && m.profiles.SelectedID() != "" {
-					m.confirmDel = true
-				}
-			case "i":
-				if m.activeTab == 1 {
-					m.importing = true
-					m.form = newImportForm()
-					return m, m.form.url.Focus()
-				}
-			default:
-				// Config tab: up/down/enter drive menu selection; the config
-				// viewer modal handles its own scrolling when open.
-				if m.activeTab == 2 {
-					var cmd tea.Cmd
-					m, cmd = m.kernel.updateKeys(key, m)
-					return m, cmd
-				}
-				// Profiles tab: selection keys drive the table; scroll keys fall
-				// through to the log viewport below.
-				if m.activeTab == 1 {
-					m.profiles.Update(msg)
-					if key == "up" || key == "down" || key == "enter" {
-						return m, nil // consumed by the table
-					}
-				}
-				// Scroll keys (PgUp/PgDn/arrows) reach the log viewport on any tab.
-				m.logs.Update(msg)
-			}
-		}
+		return m.updateKey(msg)
 	case tea.MouseMsg:
 		// Wheel events scroll the active viewport; capturing them here keeps
 		// the terminal from scrolling its own buffer (which would reveal
@@ -199,111 +95,79 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		m.closeLogStream()
 		return m, nil
-	case statusLoadedMsg:
-		m.state = &msg.state
-		m.kernel.operating = false
-		m.kernel.kConfirming = false
-		return m, nil
-	case statusErrorMsg:
-		m.err = msg.err
-		m.kernel.operating = false
-		m.kernel.kConfirming = false
-		return m, nil
-	case spinner.TickMsg:
-		if m.kernel.operating {
-			var cmd tea.Cmd
-			m.spinner, cmd = m.spinner.Update(msg)
-			return m, cmd
-		}
-		return m, nil
-	case subscribedMsg:
-		m.logCancel = msg.cancel
-		m.logCh = msg.ch
-		return m, forwardEventsCmd(msg.ch)
-	case logMsg:
-		m.logs.append(msg.line)
-		return m, forwardEventsCmd(m.logCh)
-	case stateMsg:
-		m.state = &msg.state
-		return m, forwardEventsCmd(m.logCh)
-	case logClosedMsg:
-		if !m.quitting {
-			m.err = fmt.Errorf("log stream closed")
-		}
-		return m, nil
-	case profilesLoadedMsg:
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		m.profiles.SetProfiles(msg.list, m.profActive)
-		return m, nil
-	case profileOpMsg:
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		// Refresh the list (updated timestamps, imported/deleted entries) and
-		// the kernel status (activate restarts the kernel).
-		return m, tea.Batch(fetchProfilesCmd(m.client), fetchStatusCmd(m.client))
-	case configLoadedMsg:
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		if msg.mode == m.config.mode {
-			m.config.SetContent(msg.content)
-		}
-		return m, nil
-	case networkSettingsMsg:
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		m.kernel.network = msg.settings
-		return m, nil
-	case sectionEditMsg:
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		return m, tea.Batch(fetchConfigCmd(m.client, m.config.mode), fetchStatusCmd(m.client), fetchNetworkSettingsCmd(m.client))
-	case tickMsg:
-		return m, tea.Batch(fetchStatusCmd(m.client), statusTick())
+	case subscribedMsg, logMsg, stateMsg, logClosedMsg:
+		return m.updateStream(msg)
+	case statusLoadedMsg, statusErrorMsg, spinner.TickMsg, tickMsg:
+		return m.updateStatus(msg)
+	case profilesLoadedMsg, profileOpMsg:
+		return m.updateProfilesMsg(msg)
+	case configLoadedMsg, networkSettingsMsg, sectionEditMsg:
+		return m.updateConfigMsg(msg)
 	}
 	return m, nil
 }
 
-// closeLogStream cancels the SSE subscription so its goroutine and HTTP
-// connection are released on exit.
-func (m *Model) closeLogStream() {
-	if m.logCancel != nil {
-		m.logCancel()
-		m.logCancel = nil
+// updateKey routes key presses. Modal states (filter, import, kernel edit,
+// delete confirm) take priority; the remaining keys drive the active tab.
+func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
+	key := msg.(tea.KeyPressMsg).String()
+	switch {
+	case m.filtering:
+		return m.updateFilter(key), nil
+	case m.importing:
+		return m.updateImport(msg)
+	case m.kernel.Editing():
+		return m.kernel.updateEdit(msg, m)
+	case m.kernel.EditingSection():
+		return m.kernel.updateSectionForm(msg, m)
+	case m.kernel.ViewingConfig():
+		return m.kernel.updateConfig(msg, m)
+	case m.confirmDel:
+		return m.updateConfirmDel(key)
 	}
-}
-
-// updateFilter handles the filter input state: enter applies, esc cancels,
-// backspace deletes, other single characters append.
-func (m Model) updateFilter(key string) Model {
 	switch key {
-	case "enter":
-		m.logs.SetFilter(m.filterInput)
-		m.filterInput = ""
-		m.filtering = false
-	case "esc":
-		m.filterInput = ""
-		m.filtering = false
-	case "backspace":
-		if r := []rune(m.filterInput); len(r) > 0 {
-			m.filterInput = string(r[:len(r)-1])
+	case "q", "ctrl+c":
+		m.quitting = true
+		m.closeLogStream()
+		return m, tea.Quit
+	case "1", "2", "3":
+		m.activeTab = int(key[0] - '1')
+		if m.activeTab == 2 && !m.kernel.network.loaded {
+			return m, fetchNetworkSettingsCmd(m.client)
+		}
+	case "/":
+		if m.activeTab == 0 {
+			m.filtering = true
+			// Prefill with the current filter so it is editable and can be
+			// cleared by deleting to empty and pressing enter.
+			m.filterInput = m.logs.filter
+		}
+	case "f":
+		if m.activeTab == 0 {
+			m.logs.follow = !m.logs.follow
+		}
+	case "a", "u", "d", "i":
+		if m.activeTab == 1 {
+			return m.updateProfilesKeys(key, msg)
 		}
 	default:
-		if utf8.RuneCountInString(key) == 1 {
-			m.filterInput += key
+		// Config tab: up/down/enter drive menu selection; the config viewer
+		// modal handles its own scrolling when open.
+		if m.activeTab == 2 {
+			return m.kernel.updateKeys(key, m)
 		}
+		// Profiles tab: selection keys drive the table; scroll keys fall
+		// through to the log viewport below.
+		if m.activeTab == 1 {
+			m.profiles.Update(msg)
+			if key == "up" || key == "down" || key == "enter" {
+				return m, nil // consumed by the table
+			}
+		}
+		// Scroll keys (PgUp/PgDn/arrows) reach the log viewport on any tab.
+		m.logs.Update(msg)
 	}
-	return m
+	return m, nil
 }
 
 // View returns the rendered layout as a tea.View with mouse support enabled.
