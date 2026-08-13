@@ -687,7 +687,7 @@ func renderKernelTab(state *supervisor.KernelState, selected int, err error, con
 }
 
 // tabTitles are the tab names, one per index.
-var tabTitles = []string{"Logs", "Profiles", "Config"}
+var tabTitles = []string{"Logs", "Subscriptions", "Config"}
 
 // tabHelp lists the key bindings for a tab; the footer switches with the tab
 // so only the relevant operations are shown.
