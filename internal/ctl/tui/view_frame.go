@@ -44,26 +44,15 @@ func (m Model) frameView() string {
 	// TEMP diagnostic: show the resolved window size until the short-window
 	// report is confirmed — remove once verified.
 	size := fmt.Sprintf(" %dx%d ", w, h)
-	logTab := m.logsPage()
-	help := tabHelp(m.activeTab)
-	switch {
-	case logTab.Filtering():
-		help = logTab.Help()
-	case m.activeTab == 1:
-		// The Profiles page owns its footer (import form / delete confirm
-		// hints).
-		help = m.profilesPage().Help()
-	default:
-		// The Logs page owns its footer (follow state, filter input).
-		if m.activeTab == 0 {
-			help = logTab.Help()
-		}
-	}
+	// The active page owns its footer: the Logs page renders the follow state
+	// / filter input, the Profiles page the import/delete hints and the
+	// Config page the static menu help.
+	help := m.tabs[m.activeTab].Help()
 	return strings.Join([]string{
 		shared.FrameTop(inner, title, size),
 		shared.FrameRow(statusLine, inner),
 		shared.FrameRow(activeLine, inner),
-		shared.FrameRow(renderTabs(m.activeTab), inner),
+		shared.FrameRow(renderTabs(m.tabs, m.activeTab), inner),
 		shared.FrameSep(inner),
 		m.body(inner, h-shared.FrameRows),
 		shared.FrameSep(inner),

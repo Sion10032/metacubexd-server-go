@@ -9,8 +9,7 @@ import (
 )
 
 // body renders the active tab's content at the given size, wrapping every
-// line with the frame borders. Logs shows the viewport; the other tabs are
-// centered placeholders until their phases land.
+// line with the frame borders.
 func (m Model) body(width, height int) string {
 	var content string
 	switch m.activeTab {
@@ -23,11 +22,13 @@ func (m Model) body(width, height int) string {
 		m.kernelPage().SetStatus(m.state, m.err)
 		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(m.kernelPage().View())
 	default:
+		// Defensive: the active tab is always one of 0..2 (set by the 1/2/3
+		// keys), so this branch is unreachable in practice.
 		content = lipgloss.NewStyle().
 			Width(width).Height(height).
 			Align(lipgloss.Center, lipgloss.Center).
 			Faint(true).
-			Render("[" + tabTitles[m.activeTab] + " tab — not implemented yet]")
+			Render("[" + m.tabs[m.activeTab].Title() + " tab — not implemented yet]")
 	}
 	lines := strings.Split(content, "\n")
 	for i, l := range lines {
