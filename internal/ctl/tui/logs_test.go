@@ -259,10 +259,12 @@ func TestFollowIndicator(t *testing.T) {
 	}
 }
 
-// TestScrollOnEveryTab verifies PgDn scrolls the log viewport from any tab.
+// TestScrollOnEveryTab verifies PgDn scrolls the active viewport: the log
+// viewport on the Logs and Subscriptions tabs, and the config viewport on the
+// Config tab.
 func TestScrollOnEveryTab(t *testing.T) {
-	for _, tab := range []string{"1", "2", "3"} {
-		t.Run("tab "+tab, func(t *testing.T) {
+	for _, tab := range []string{"1", "2"} {
+		t.Run("logs tab "+tab, func(t *testing.T) {
 			m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 			nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 			mdl := nm.(Model)
@@ -274,12 +276,23 @@ func TestScrollOnEveryTab(t *testing.T) {
 			nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tab)})
 
 			nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-			mdl = nm.(Model)
-			if mdl.logs.viewport.YOffset == 0 {
+			if YOffset := nm.(Model).logs.viewport.YOffset; YOffset == 0 {
 				t.Errorf("PgDn on tab %s did not scroll the log viewport (YOffset=0)", tab)
 			}
 		})
 	}
+
+	t.Run("config tab 3", func(t *testing.T) {
+		m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+		nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		nm, _ = nm.Update(configLoadedMsg{mode: configActive, content: strings.Repeat("line\n", 50)})
+		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+
+		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+		if YOffset := nm.(Model).config.viewport.YOffset; YOffset == 0 {
+			t.Errorf("PgDn on tab 3 did not scroll the config viewport (YOffset=0)")
+		}
+	})
 }
 
 // TestViewportScroll verifies PgDn is forwarded to the log viewport.

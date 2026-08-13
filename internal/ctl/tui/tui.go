@@ -28,6 +28,7 @@ type Model struct {
 	err         error
 	logs        LogsModel
 	profiles    ProfilesModel
+	config      ConfigModel
 	profActive  string
 	importing   bool
 	form        importForm
@@ -51,7 +52,7 @@ func New(client *ctl.Client) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	return Model{client: client, logs: NewLogsModel(), profiles: NewProfilesModel(), spinner: s}
+	return Model{client: client, logs: NewLogsModel(), profiles: NewProfilesModel(), config: NewConfigModel(), spinner: s}
 }
 
 // statusLoadedMsg carries a fresh kernel state from the control API.
@@ -98,6 +99,13 @@ type profileOpMsg struct {
 	err error
 }
 
+// configLoadedMsg carries a fetched config body (active or runtime).
+type configLoadedMsg struct {
+	mode    int
+	content string
+	err     error
+}
+
 // Init returns the initial commands: fetch kernel status, poll it every
 // second, subscribe to the SSE log stream and load the profile list.
 func (m Model) Init() tea.Cmd {
@@ -114,6 +122,22 @@ func fetchProfilesCmd(c *ctl.Client) tea.Cmd {
 	return func() tea.Msg {
 		list, err := c.ProfilesList()
 		return profilesLoadedMsg{list: list, err: err}
+	}
+}
+
+// fetchConfigCmd loads the active (mode 0) or runtime (mode 1) config once.
+func fetchConfigCmd(c *ctl.Client, mode int) tea.Cmd {
+	return func() tea.Msg {
+		var (
+			content string
+			err     error
+		)
+		if mode == configRuntime {
+			content, err = c.GetRuntimeConfig()
+		} else {
+			content, err = c.GetConfig()
+		}
+		return configLoadedMsg{mode: mode, content: content, err: err}
 	}
 }
 
@@ -319,6 +343,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "1", "2", "3":
 			m.activeTab = int(key[0] - '1')
+			if m.activeTab == 2 && !m.config.loaded {
+				return m, fetchConfigCmd(m.client, m.config.mode)
+			}
 		case "/":
 			if m.activeTab == 0 {
 				m.filtering = true
@@ -359,10 +386,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.form = newImportForm()
 				return m, m.form.url.Focus()
 			}
+		case "c":
+			if m.activeTab == 2 {
+				m.config.ToggleMode()
+				return m, fetchConfigCmd(m.client, m.config.mode)
+			}
 		default:
-			// Config tab: up/down/enter drive kernel selection; other keys (and
-			// PgUp/PgDn everywhere) fall through to the log viewport so scrolling
-			// works on every tab.
+			// Config tab: up/down/enter drive kernel selection; other keys
+			// scroll the config viewport below.
 			if m.activeTab == 2 {
 				var cmd tea.Cmd
 				m, cmd = m.updateKernelKeys(key)
@@ -372,6 +403,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if key == "up" || key == "down" {
 					return m, nil // consumed by kernel selection
 				}
+				m.config.Update(msg)
+				return m, nil
 			}
 			// Profiles tab: selection keys drive the table; scroll keys fall
 			// through to the log viewport below.
@@ -385,10 +418,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logs.Update(msg)
 		}
 	case tea.MouseMsg:
-		// Wheel events scroll the log viewport; capturing them here keeps the
-		// terminal from scrolling its own buffer (which would reveal content
-		// from before the TUI started).
-		m.logs.Update(msg)
+		// Wheel events scroll the active viewport; capturing them here keeps
+		// the terminal from scrolling its own buffer (which would reveal
+		// content from before the TUI started).
+		if m.activeTab == 2 {
+			m.config.Update(msg)
+		} else {
+			m.logs.Update(msg)
+		}
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -447,6 +484,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh the list (updated timestamps, imported/deleted entries) and
 		// the kernel status (activate restarts the kernel).
 		return m, tea.Batch(fetchProfilesCmd(m.client), fetchStatusCmd(m.client))
+	case configLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		if msg.mode == m.config.mode {
+			m.config.SetContent(msg.content)
+		}
+		return m, nil
 	case tickMsg:
 		return m, tea.Batch(fetchStatusCmd(m.client), statusTick())
 	}
@@ -668,7 +714,7 @@ func (m Model) body(width, height int) string {
 			content = m.profiles.View()
 		}
 	case 2:
-		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(renderKernelTab(m.state, m.kSelected, m.err, m.kConfirming))
+		content = m.renderConfigTab(width, height)
 	default:
 		content = lipgloss.NewStyle().
 			Width(width).Height(height).
@@ -722,8 +768,8 @@ func frameRow(content string, inner int) string {
 
 // renderKernelTab renders the kernel control section of the Config tab:
 // state summary, last error and the operation list with the selection
-// highlighted. Config editing (Phase 3) lands below this section. When
-// confirming, a destructive-operation prompt is appended.
+// highlighted. The config viewport (renderConfigTab) renders below this
+// section. When confirming, a destructive-operation prompt is appended.
 func renderKernelTab(state *supervisor.KernelState, selected int, err error, confirming bool) string {
 	lines := []string{renderStatus(state, "")}
 	if err != nil {
@@ -743,8 +789,22 @@ func renderKernelTab(state *supervisor.KernelState, selected int, err error, con
 	if confirming {
 		lines = append(lines, "", errorStyle.Render("⚠ Recover 将重置 active config,确认执行? (y 确认 / 其他取消)"))
 	}
-	lines = append(lines, "", lipgloss.NewStyle().Faint(true).Render("config editor — Phase 3"))
 	return strings.Join(lines, "\n")
+}
+
+// renderConfigTab composes the Config tab body: the kernel operation list on
+// top, then a mode header and the scrollable config viewport below.
+func (m Model) renderConfigTab(width, height int) string {
+	kernel := renderKernelTab(m.state, m.kSelected, m.err, m.kConfirming)
+	kernelLines := strings.Count(kernel, "\n") + 1
+	modeLine := "config (" + m.config.Mode() + "):"
+	configHeight := height - kernelLines - 1
+	if configHeight < 1 {
+		configHeight = 1
+	}
+	m.config.SetSize(width, configHeight)
+	content := strings.Join([]string{kernel, modeLine, m.config.View()}, "\n")
+	return lipgloss.NewStyle().Height(height).MaxHeight(height).Render(content)
 }
 
 // tabTitles are the tab names, one per index.
@@ -758,7 +818,7 @@ var helpByTab = [][]string{
 	// Profiles
 	{"1-3:tabs", "a:activate", "u:refresh", "d:delete", "i:import", "q:quit"},
 	// Config
-	{"1-3:tabs", "↑↓:select", "enter:run", "q:quit"},
+	{"1-3:tabs", "↑↓:select", "enter:run", "c:config", "q:quit"},
 }
 
 func tabHelp(active int) string {
