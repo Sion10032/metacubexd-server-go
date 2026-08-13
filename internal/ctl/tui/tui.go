@@ -9,33 +9,32 @@ import (
 
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui/components"
+	"metacubexd-server-go/internal/ctl/tui/pages/logs"
 	"metacubexd-server-go/internal/ctl/tui/shared"
 	"metacubexd-server-go/internal/supervisor"
 )
 
-// Model is the top-level Bubble Tea model. It owns the kernel state, the log
-// viewport, the current tab and the per-tab sub models.
+// Model is the top-level Bubble Tea model. It owns the kernel state, the
+// active tab index and the tab pages; feature state lives inside each page.
 type Model struct {
-	client      *ctl.Client
-	state       *supervisor.KernelState
-	err         error
-	logs        LogsModel
-	profiles    ProfilesModel
-	config      ConfigModel
-	kernel      KernelModel
-	profActive  string
-	importing   bool
-	form        components.Form
-	confirmDel  bool
-	activeTab   int
-	spinner     spinner.Model
-	filtering   bool
-	filterInput string
-	width       int
-	height      int
-	logCh       <-chan ctl.Event
-	logCancel   context.CancelFunc
-	quitting    bool
+	client     *ctl.Client
+	state      *supervisor.KernelState
+	err        error
+	tabs       []shared.Tab
+	profiles   ProfilesModel
+	config     ConfigModel
+	kernel     KernelModel
+	profActive string
+	importing  bool
+	form       components.Form
+	confirmDel bool
+	activeTab  int
+	spinner    spinner.Model
+	width      int
+	height     int
+	logCh      <-chan ctl.Event
+	logCancel  context.CancelFunc
+	quitting   bool
 }
 
 // New returns a Model for the given control API client.
@@ -45,7 +44,7 @@ func New(client *ctl.Client) Model {
 	s.Style = shared.SpinnerStyle
 	return Model{
 		client:   client,
-		logs:     NewLogsModel(),
+		tabs:     []shared.Tab{logs.New(client)},
 		profiles: NewProfilesModel(),
 		config:   NewConfigModel(),
 		kernel:   NewKernelModel(),
@@ -79,13 +78,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeTab == 2 {
 			m.config.Update(msg)
 		} else {
-			m.logs.Update(msg)
+			m.tabs[0].Update(msg)
 		}
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		if msg.Height > shared.FrameRows {
-			m.logs.SetSize(msg.Width-2, msg.Height-shared.FrameRows)
+			m.tabs[0].SetSize(msg.Width-2, msg.Height-shared.FrameRows)
 		}
 		return m, nil
 	case tea.BackgroundColorMsg:
@@ -113,9 +112,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // delete confirm) take priority; the remaining keys drive the active tab.
 func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 	key := msg.(tea.KeyPressMsg).String()
+	logsTab := m.logsPage()
 	switch {
-	case m.filtering:
-		return m.updateFilter(key), nil
+	case logsTab.Filtering():
+		logsTab.UpdateFilterKey(key)
+		return m, nil
 	case m.importing:
 		return m.updateImport(msg)
 	case m.kernel.Editing():
@@ -139,14 +140,11 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case "/":
 		if m.activeTab == 0 {
-			m.filtering = true
-			// Prefill with the current filter so it is editable and can be
-			// cleared by deleting to empty and pressing enter.
-			m.filterInput = m.logs.filter
+			logsTab.StartFilter()
 		}
 	case "f":
 		if m.activeTab == 0 {
-			m.logs.follow = !m.logs.follow
+			logsTab.ToggleFollow()
 		}
 	case "a", "u", "d", "i":
 		if m.activeTab == 1 {
@@ -167,9 +165,14 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 		// Scroll keys (PgUp/PgDn/arrows) reach the log viewport on any tab.
-		m.logs.Update(msg)
+		m.tabs[0].Update(msg)
 	}
 	return m, nil
+}
+
+// logsPage returns the Logs page stored in tabs[0].
+func (m Model) logsPage() *logs.Model {
+	return m.tabs[0].(*logs.Model)
 }
 
 // View returns the rendered layout as a tea.View with mouse support enabled.
@@ -179,8 +182,8 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) View() tea.View {
 	var content string
 	if m.width > 0 && m.width < shared.NarrowWidth {
-		m.logs.SetSize(m.width, m.height)
-		content = m.logs.View()
+		m.tabs[0].SetSize(m.width, m.height)
+		content = m.tabs[0].View()
 	} else {
 		content = m.frameView()
 	}

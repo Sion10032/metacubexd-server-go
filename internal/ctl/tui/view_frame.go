@@ -26,7 +26,7 @@ func (m Model) frameView() string {
 	// frame rows. SetSize here is a belt-and-suspenders re-scroll; the size is
 	// applied on WindowSizeMsg so the model's viewport is always current.
 	if h > shared.FrameRows {
-		m.logs.SetSize(inner, h-shared.FrameRows)
+		m.tabs[0].SetSize(inner, h-shared.FrameRows)
 	}
 
 	statusLine := shared.RenderStatus(m.state, m.client.Endpoint())
@@ -44,22 +44,19 @@ func (m Model) frameView() string {
 	// TEMP diagnostic: show the resolved window size until the short-window
 	// report is confirmed — remove once verified.
 	size := fmt.Sprintf(" %dx%d ", w, h)
+	logTab := m.logsPage()
 	help := tabHelp(m.activeTab)
 	switch {
-	case m.filtering:
-		help = "filter: " + m.filterInput + "▌  (enter:apply  esc:cancel)"
+	case logTab.Filtering():
+		help = logTab.Help()
 	case m.importing:
 		help = "import: tab:switch  enter:import  esc:cancel"
 	case m.confirmDel:
 		help = "⚠ 删除所选 profile? (y 确认 / 其他取消)"
 	default:
-		// Surface the follow-at-bottom state on the Logs tab only.
+		// The Logs page owns its footer (follow state, filter input).
 		if m.activeTab == 0 {
-			flag := "ON"
-			if !m.logs.follow {
-				flag = "OFF"
-			}
-			help = strings.Replace(help, "f:follow", "f:follow("+flag+")", 1)
+			help = logTab.Help()
 		}
 	}
 	return strings.Join([]string{
