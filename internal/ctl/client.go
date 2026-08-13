@@ -115,6 +115,30 @@ func (c *Client) doJSON(method, path string, body io.Reader, out any) error {
 	return nil
 }
 
+// doText performs a request and returns the raw response body as a string,
+// surfacing the {"error": ...} message on non-2xx responses.
+func (c *Client) doText(method, path string, body io.Reader) (string, error) {
+	resp, err := c.do(method, path, body)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var e struct {
+			Error string `json:"error"`
+		}
+		if derr := json.NewDecoder(resp.Body).Decode(&e); derr == nil && e.Error != "" {
+			return "", errors.New(e.Error)
+		}
+		return "", errors.New(resp.Status)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 // ProfilesList fetches all profiles.
 func (c *Client) ProfilesList() ([]profile.Meta, error) {
 	var list []profile.Meta
@@ -173,6 +197,75 @@ func (c *Client) ProfileActivate(id string) (supervisor.KernelState, error) {
 // ProfileDelete removes a profile.
 func (c *Client) ProfileDelete(id string) error {
 	return c.doJSON(http.MethodDelete, "/api/control/profiles/"+id, nil, nil)
+}
+
+// WebdavOptions configures backup/restore against a WebDAV server. Field
+// names mirror the server's /api/control/backup + /restore request body.
+type WebdavOptions struct {
+	URL      string `json:"url"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Dir      string `json:"dir"`
+}
+
+// GetConfig fetches the active profile's source YAML.
+func (c *Client) GetConfig() (string, error) {
+	return c.doText(http.MethodGet, "/api/control/config", nil)
+}
+
+// GetRuntimeConfig fetches the runtime config — the file mihomo actually
+// runs (post-injection).
+func (c *Client) GetRuntimeConfig() (string, error) {
+	return c.doText(http.MethodGet, "/api/control/config/runtime", nil)
+}
+
+// PutSection replaces one top-level key in the active config. When restart is
+// false the change is persisted without restarting the kernel.
+func (c *Client) PutSection(key string, value any, restart bool) error {
+	body, err := json.Marshal(struct {
+		Key     string `json:"key"`
+		Value   any    `json:"value"`
+		Restart *bool  `json:"restart"`
+	}{key, value, &restart})
+	if err != nil {
+		return err
+	}
+	return c.doJSON(http.MethodPut, "/api/control/config/section", bytes.NewReader(body), nil)
+}
+
+// GeoUpdate downloads mihomo's geoip/geosite/country.mmdb assets into the
+// server's home dir.
+func (c *Client) GeoUpdate() error {
+	return c.doJSON(http.MethodPost, "/api/control/geo/update", nil, nil)
+}
+
+// Backup pushes every profile to a WebDAV server.
+func (c *Client) Backup(opts WebdavOptions) error {
+	body, err := json.Marshal(struct {
+		Webdav WebdavOptions `json:"webdav"`
+	}{opts})
+	if err != nil {
+		return err
+	}
+	return c.doJSON(http.MethodPost, "/api/control/backup", bytes.NewReader(body), nil)
+}
+
+// Restore pulls the profile bundle back from WebDAV, returning the number of
+// profiles restored.
+func (c *Client) Restore(opts WebdavOptions) (int, error) {
+	body, err := json.Marshal(struct {
+		Webdav WebdavOptions `json:"webdav"`
+	}{opts})
+	if err != nil {
+		return 0, err
+	}
+	var out struct {
+		Restored int `json:"restored"`
+	}
+	if err := c.doJSON(http.MethodPost, "/api/control/restore", bytes.NewReader(body), &out); err != nil {
+		return 0, err
+	}
+	return out.Restored, nil
 }
 
 // KernelStart starts the kernel and returns the new state.

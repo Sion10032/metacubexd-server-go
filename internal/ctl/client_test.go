@@ -1,9 +1,10 @@
 package ctl
 
 import (
-	"errors"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -242,4 +243,183 @@ func TestSubscribeLogs(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("channel not closed after cancel — goroutine leak")
 	}
+}
+
+// TestConfigGet verifies GetConfig and GetRuntimeConfig fetch raw YAML from
+// the correct endpoints and surface errors.
+func TestConfigGet(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*Client) (string, error)
+		path string
+	}{
+		{"config", (*Client).GetConfig, "/api/control/config"},
+		{"runtime", (*Client).GetRuntimeConfig, "/api/control/config/runtime"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+" ok", func(t *testing.T) {
+			var gotURI string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotURI = r.Method + " " + r.RequestURI
+				w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+				fmt.Fprint(w, "mixed-port: 7890\n")
+			}))
+			defer srv.Close()
+
+			c := NewClient(srv.URL, "", false)
+			got, err := tt.call(c)
+			if err != nil {
+				t.Fatalf("%s: %v", tt.name, err)
+			}
+			if got != "mixed-port: 7890\n" {
+				t.Errorf("%s = %q, want raw YAML body", tt.name, got)
+			}
+			if want := "GET " + tt.path; gotURI != want {
+				t.Errorf("request = %q, want %q", gotURI, want)
+			}
+		})
+
+		t.Run(tt.name+" error", func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprint(w, `{"error":"config exploded"}`)
+			}))
+			defer srv.Close()
+
+			c := NewClient(srv.URL, "", false)
+			if _, err := tt.call(c); err == nil {
+				t.Errorf("%s: want error, got nil", tt.name)
+			} else if !strings.Contains(err.Error(), "config exploded") {
+				t.Errorf("%s: error = %q, want server message", tt.name, err)
+			}
+		})
+	}
+}
+
+// TestConfigPutSection verifies PutSection sends key/value/restart — including
+// an explicit restart=false — and maps errors.
+func TestConfigPutSection(t *testing.T) {
+	tests := []struct {
+		name    string
+		restart bool
+	}{
+		{"restart", true},
+		{"no-restart", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotURI, gotBody string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotURI = r.Method + " " + r.RequestURI
+				b, _ := io.ReadAll(r.Body)
+				gotBody = string(b)
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"status":"running"}`)
+			}))
+			defer srv.Close()
+
+			c := NewClient(srv.URL, "", false)
+			if err := c.PutSection("mixed-port", 7890, tt.restart); err != nil {
+				t.Fatalf("PutSection: %v", err)
+			}
+			if want := "PUT /api/control/config/section"; gotURI != want {
+				t.Errorf("request = %q, want %q", gotURI, want)
+			}
+			if !strings.Contains(gotBody, `"key":"mixed-port"`) || !strings.Contains(gotBody, `"value":7890`) {
+				t.Errorf("body = %q, want key and value", gotBody)
+			}
+			wantRestart := fmt.Sprintf(`"restart":%t`, tt.restart)
+			if !strings.Contains(gotBody, wantRestart) {
+				t.Errorf("body = %q, want %s", gotBody, wantRestart)
+			}
+		})
+	}
+
+	t.Run("error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			fmt.Fprint(w, `{"error":"no active profile"}`)
+		}))
+		defer srv.Close()
+
+		c := NewClient(srv.URL, "", false)
+		if err := c.PutSection("mixed-port", 7890, true); err == nil {
+			t.Error("want error, got nil")
+		} else if !strings.Contains(err.Error(), "no active profile") {
+			t.Errorf("error = %q, want server message", err)
+		}
+	})
+}
+
+// TestConfigGeoUpdate verifies GeoUpdate hits the geo endpoint and surfaces
+// errors.
+func TestConfigGeoUpdate(t *testing.T) {
+	var gotURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.Method + " " + r.RequestURI
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true,"files":["geoip.metadb"]}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", false)
+	if err := c.GeoUpdate(); err != nil {
+		t.Fatalf("GeoUpdate: %v", err)
+	}
+	if want := "POST /api/control/geo/update"; gotURI != want {
+		t.Errorf("request = %q, want %q", gotURI, want)
+	}
+}
+
+// TestConfigBackupRestore verifies Backup and Restore send the webdav options
+// and decode the response.
+func TestConfigBackupRestore(t *testing.T) {
+	opts := WebdavOptions{URL: "https://dav.example.com", Username: "u", Password: "p", Dir: "/backups"}
+
+	t.Run("backup", func(t *testing.T) {
+		var gotURI, gotBody string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotURI = r.Method + " " + r.RequestURI
+			b, _ := io.ReadAll(r.Body)
+			gotBody = string(b)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"ok":true,"path":"/backups/metacubexd-backup.json"}`)
+		}))
+		defer srv.Close()
+
+		c := NewClient(srv.URL, "", false)
+		if err := c.Backup(opts); err != nil {
+			t.Fatalf("Backup: %v", err)
+		}
+		if want := "POST /api/control/backup"; gotURI != want {
+			t.Errorf("request = %q, want %q", gotURI, want)
+		}
+		if !strings.Contains(gotBody, `"url":"https://dav.example.com"`) || !strings.Contains(gotBody, `"dir":"/backups"`) {
+			t.Errorf("body = %q, want webdav options", gotBody)
+		}
+	})
+
+	t.Run("restore", func(t *testing.T) {
+		var gotURI string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotURI = r.Method + " " + r.RequestURI
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"ok":true,"restored":3}`)
+		}))
+		defer srv.Close()
+
+		c := NewClient(srv.URL, "", false)
+		n, err := c.Restore(opts)
+		if err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+		if n != 3 {
+			t.Errorf("restored = %d, want 3", n)
+		}
+		if want := "POST /api/control/restore"; gotURI != want {
+			t.Errorf("request = %q, want %q", gotURI, want)
+		}
+	})
 }
