@@ -109,9 +109,7 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 	case logsTab.Filtering():
 		logsTab.UpdateFilterKey(key)
 		return m, nil
-	case m.activeTab == 1 && m.profilesPage().Importing():
-		return m.updateTabKey(msg)
-	case m.activeTab == 1 && m.profilesPage().ConfirmingDel():
+	case m.activeTab == 1 && (m.profilesPage().Importing() || m.profilesPage().ConfirmingDel()):
 		return m.updateTabKey(msg)
 	}
 	// The kernel page's popup (network-field editor, section editor, config
@@ -200,57 +198,10 @@ func (m Model) View() tea.View {
 	} else {
 		content = m.frameView()
 	}
-	if modal := m.tabs[2].Overlay(); modal != nil {
+	if modal := m.tabs[m.activeTab].Overlay(); modal != nil {
 		content = components.OverlayModal(content, modal.View(m.width, m.height), m.width, m.height)
 	}
 	v := tea.NewView(content)
 	v.MouseMode = tea.MouseModeCellMotion
 	return v
-}
-
-// updateProfilesMsg routes profile load results and operation outcomes.
-// Errors surface on the root status bar; successful results are forwarded to
-// the Profiles page, which refreshes its table and re-issues the refetch.
-func (m Model) updateProfilesMsg(msg tea.Msg) (Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case profiles.ProfilesLoadedMsg:
-		if msg.Err != nil {
-			m.err = msg.Err
-			return m, nil
-		}
-		tab, cmd := m.tabs[1].Update(msg)
-		m.tabs[1] = tab
-		return m, cmd
-	case profiles.ProfileOpMsg:
-		if msg.Err != nil {
-			m.err = msg.Err
-			return m, nil
-		}
-		tab, cmd := m.tabs[1].Update(msg)
-		m.tabs[1] = tab
-		return m, cmd
-	}
-	return m, nil
-}
-
-// updateKernelMsg routes config fetches, network settings loads and section
-// edit results to the Kernel page. Errors surface on the root status bar;
-// successful results are forwarded to the page.
-func (m Model) updateKernelMsg(msg tea.Msg) (Model, tea.Cmd) {
-	var err error
-	switch msg := msg.(type) {
-	case kernel.ConfigLoadedMsg:
-		err = msg.Err
-	case kernel.NetworkSettingsMsg:
-		err = msg.Err
-	case kernel.SectionEditMsg:
-		err = msg.Err
-	}
-	if err != nil {
-		m.err = err
-		return m, nil
-	}
-	tab, cmd := m.tabs[2].Update(msg)
-	m.tabs[2] = tab
-	return m, cmd
 }
