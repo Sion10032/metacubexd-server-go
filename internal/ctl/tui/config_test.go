@@ -12,9 +12,24 @@ import (
 	"metacubexd-server-go/internal/ctl"
 )
 
-// TestConfigTabLoad verifies entering the Config tab fetches and renders the
-// active config.
-func TestConfigTabLoad(t *testing.T) {
+// TestConfigMenu verifies the Config tab lists the kernel operations plus the
+// config viewer entry.
+func TestConfigMenu(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	nm, _ = nm.Update(keyPress("3"))
+
+	got := ansiRe.ReplaceAllString(nm.View().Content, "")
+	for _, want := range []string{"Start", "Stop", "Restart", "View Config"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Config tab = %q, missing %q", got, want)
+		}
+	}
+}
+
+// TestConfigViewerOpen verifies selecting the View Config entry opens the
+// modal, fetches the active config, and renders it.
+func TestConfigViewerOpen(t *testing.T) {
 	var gotURI string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotURI = r.Method + " " + r.RequestURI
@@ -25,10 +40,18 @@ func TestConfigTabLoad(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	nm, _ = nm.Update(keyPress("3")) // Config tab
 
-	nm, cmd := nm.Update(keyPress("3"))
+	// Move selection down to the View Config entry (last).
+	for range kernelOps {
+		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	nm, cmd := nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("entering Config tab returned no command")
+		t.Fatal("enter on View Config returned no command")
+	}
+	if !nm.(Model).viewingConfig {
+		t.Fatal("viewingConfig should be true")
 	}
 	msg := cmd()
 	if want := "GET /api/control/config"; gotURI != want {
@@ -40,16 +63,17 @@ func TestConfigTabLoad(t *testing.T) {
 
 	nm, _ = nm.Update(msg)
 	got := ansiRe.ReplaceAllString(nm.View().Content, "")
-	if !strings.Contains(got, "config (active):") {
-		t.Errorf("View missing config mode header:\n%s", got)
+	if !strings.Contains(got, "View Config (active)") {
+		t.Errorf("View missing config modal header:\n%s", got)
 	}
 	if !strings.Contains(got, "mixed-port") {
 		t.Errorf("View missing config content:\n%s", got)
 	}
 }
 
-// TestConfigToggleKey verifies c toggles to the runtime config and fetches it.
-func TestConfigToggleKey(t *testing.T) {
+// TestConfigViewerToggle verifies c inside the viewer toggles to the runtime
+// config and fetches it.
+func TestConfigViewerToggle(t *testing.T) {
 	var gotURI string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotURI = r.Method + " " + r.RequestURI
@@ -59,7 +83,10 @@ func TestConfigToggleKey(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(keyPress("3"))
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	mdl := nm.(Model)
+	mdl.viewingConfig = true
+	nm = mdl
 	nm, _ = nm.Update(configLoadedMsg{mode: configActive, content: "active: true\n"})
 
 	nm, cmd := nm.Update(keyPress("c"))
@@ -75,5 +102,22 @@ func TestConfigToggleKey(t *testing.T) {
 	}
 	if got := msg.(configLoadedMsg); got.mode != configRuntime {
 		t.Errorf("fetch mode = %d, want runtime", got.mode)
+	}
+}
+
+// TestConfigViewerClose verifies esc closes the config viewer modal.
+func TestConfigViewerClose(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	mdl := nm.(Model)
+	mdl.viewingConfig = true
+	nm = mdl
+
+	nm, cmd := nm.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if cmd != nil {
+		t.Fatal("esc should not return a command")
+	}
+	if nm.(Model).viewingConfig {
+		t.Fatal("viewingConfig should be false after esc")
 	}
 }

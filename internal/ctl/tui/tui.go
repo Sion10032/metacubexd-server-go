@@ -23,35 +23,36 @@ import (
 // Model is the top-level Bubble Tea model. It owns the kernel state, the log
 // viewport and the current tab.
 type Model struct {
-	client      *ctl.Client
-	state       *supervisor.KernelState
-	err         error
-	logs        LogsModel
-	profiles    ProfilesModel
-	config      ConfigModel
-	profActive  string
-	importing   bool
-	form        importForm
-	confirmDel  bool
-	activeTab   int
-	kSelected   int
-	kConfirming bool
-	operating   bool
-	spinner     spinner.Model
-	filtering   bool
-	filterInput string
-	width       int
-	height      int
-	logCh       <-chan ctl.Event
-	logCancel   context.CancelFunc
-	quitting    bool
+	client        *ctl.Client
+	state         *supervisor.KernelState
+	err           error
+	logs          LogsModel
+	profiles      ProfilesModel
+	config        ConfigModel
+	profActive    string
+	importing     bool
+	form          importForm
+	confirmDel    bool
+	viewingConfig bool
+	activeTab     int
+	kSelected     int
+	kConfirming   bool
+	operating     bool
+	spinner       spinner.Model
+	filtering     bool
+	filterInput   string
+	width         int
+	height        int
+	logCh         <-chan ctl.Event
+	logCancel     context.CancelFunc
+	quitting      bool
 }
 
 // New returns a Model for the given control API client.
 func New(client *ctl.Client) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	s.Style = spinnerStyle
 	return Model{client: client, logs: NewLogsModel(), profiles: NewProfilesModel(), config: NewConfigModel(), spinner: s}
 }
 
@@ -114,7 +115,16 @@ func (m Model) Init() tea.Cmd {
 		statusTick(),
 		subscribeCmd(m.client),
 		fetchProfilesCmd(m.client),
+		requestBackgroundColorCmd(),
 	)
+}
+
+// requestBackgroundColorCmd asks the terminal for its background color so the
+// theme can adapt to dark/light.
+func requestBackgroundColorCmd() tea.Cmd {
+	return func() tea.Msg {
+		return tea.RequestBackgroundColor()
+	}
 }
 
 // fetchProfilesCmd loads the profile list once.
@@ -324,6 +334,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m, cmd = m.updateImport(msg)
 			return m, cmd
 		}
+		if m.viewingConfig {
+			var cmd tea.Cmd
+			m, cmd = m.updateConfigViewer(msg)
+			return m, cmd
+		}
 		if m.confirmDel {
 			m.confirmDel = false
 			if key == "y" || key == "Y" {
@@ -343,9 +358,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "1", "2", "3":
 			m.activeTab = int(key[0] - '1')
-			if m.activeTab == 2 && !m.config.loaded {
-				return m, fetchConfigCmd(m.client, m.config.mode)
-			}
 		case "/":
 			if m.activeTab == 0 {
 				m.filtering = true
@@ -386,25 +398,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.form = newImportForm()
 				return m, m.form.url.Focus()
 			}
-		case "c":
-			if m.activeTab == 2 {
-				m.config.ToggleMode()
-				return m, fetchConfigCmd(m.client, m.config.mode)
-			}
 		default:
-			// Config tab: up/down/enter drive kernel selection; other keys
-			// scroll the config viewport below.
+			// Config tab: up/down/enter drive menu selection; the config
+			// viewer modal handles its own scrolling when open.
 			if m.activeTab == 2 {
 				var cmd tea.Cmd
 				m, cmd = m.updateKernelKeys(key)
 				if cmd != nil {
 					return m, cmd
 				}
-				if key == "up" || key == "down" {
-					return m, nil // consumed by kernel selection
-				}
-				m.config.Update(msg)
-				return m, nil
+				return m, nil // consumed by menu selection
 			}
 			// Profiles tab: selection keys drive the table; scroll keys fall
 			// through to the log viewport below.
@@ -432,6 +435,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Height > frameRows {
 			m.logs.SetSize(msg.Width-2, msg.Height-frameRows)
 		}
+		return m, nil
+	case tea.BackgroundColorMsg:
+		setTheme(msg.IsDark())
+		setModalBackground(msg.Color)
+		m.spinner.Style = spinnerStyle
 		return m, nil
 	case tea.QuitMsg:
 		m.quitting = true
@@ -559,10 +567,21 @@ var kernelOps = []kernelOp{
 	// {"Recover", (*ctl.Client).KernelRecover},
 }
 
+// configMenuEntries returns the selectable labels on the Config tab: the
+// kernel operations plus the config viewer entry.
+func configMenuEntries() []string {
+	entries := make([]string, 0, len(kernelOps)+1)
+	for _, op := range kernelOps {
+		entries = append(entries, op.label)
+	}
+	return append(entries, "View Config")
+}
+
 // updateKernelKeys handles selection and execution while the Config tab is
 // active. The Recover confirmation state (kConfirming) is kept for when
 // Recover is re-enabled.
 func (m Model) updateKernelKeys(key string) (Model, tea.Cmd) {
+	menuLen := len(configMenuEntries())
 	if m.kConfirming {
 		m.kConfirming = false
 		if key == "y" || key == "Y" {
@@ -572,16 +591,41 @@ func (m Model) updateKernelKeys(key string) (Model, tea.Cmd) {
 	}
 	switch key {
 	case "up", "k":
-		m.kSelected = (m.kSelected + len(kernelOps) - 1) % len(kernelOps)
+		m.kSelected = (m.kSelected + menuLen - 1) % menuLen
 	case "down", "j":
-		m.kSelected = (m.kSelected + 1) % len(kernelOps)
+		m.kSelected = (m.kSelected + 1) % menuLen
 	case "enter", "space":
+		if m.kSelected == len(kernelOps) {
+			m.viewingConfig = true
+			m.config.ResetScroll()
+			return m, fetchConfigCmd(m.client, m.config.mode)
+		}
 		op := kernelOps[m.kSelected]
 		if op.label == "Recover" {
 			m.kConfirming = true
 			return m, nil
 		}
 		return m.startKernelOp(op)
+	}
+	return m, nil
+}
+
+// updateConfigViewer drives the config viewer modal: esc closes, c toggles
+// active/runtime, other keys scroll the viewport.
+func (m Model) updateConfigViewer(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "esc":
+			m.viewingConfig = false
+			return m, nil
+		case "c":
+			m.config.ToggleMode()
+			m.config.ResetScroll()
+			return m, fetchConfigCmd(m.client, m.config.mode)
+		default:
+			return m, m.config.Update(msg)
+		}
 	}
 	return m, nil
 }
@@ -603,6 +647,9 @@ func (m Model) View() tea.View {
 		content = m.logs.View()
 	} else {
 		content = m.frameView()
+	}
+	if m.viewingConfig {
+		content = overlayModal(content, m.configModal(m.width, m.height), m.width, m.height)
 	}
 	v := tea.NewView(content)
 	v.MouseMode = tea.MouseModeCellMotion
@@ -708,6 +755,52 @@ func (m Model) importFormView(width, height int) string {
 		Render(content)
 }
 
+// overlayModal centers modal over base using lipgloss's compositor, so the
+// styled modal draws on top of the styled frame without mangling ANSI codes.
+func overlayModal(base, modal string, w, h int) string {
+	mw, mh := lipgloss.Width(modal), lipgloss.Height(modal)
+	x := (w - mw) / 2
+	if x < 0 {
+		x = 0
+	}
+	y := (h - mh) / 2
+	if y < 0 {
+		y = 0
+	}
+	comp := lipgloss.NewCompositor(
+		lipgloss.NewLayer(base),
+		lipgloss.NewLayer(modal).X(x).Y(y).Z(1),
+	)
+	return comp.Render()
+}
+
+// configModal renders the bordered config viewer modal for the given terminal
+// size: a bold header, the scrollable config viewport, and a key-hint footer.
+func (m Model) configModal(w, h int) string {
+	cw := w - 8
+	if cw < 24 {
+		cw = 24
+	}
+	if cw > 80 {
+		cw = 80
+	}
+	title := "View Config (" + m.config.Mode() + ")"
+	header := lipgloss.NewStyle().Bold(true).Width(cw).Align(lipgloss.Center).Render(title)
+	sep := strings.Repeat("─", cw)
+	footer := lipgloss.NewStyle().Width(cw).Align(lipgloss.Center).Render("c:active/runtime  ↑↓:scroll  esc:close")
+	viewHeight := h - 10
+	if viewHeight < 1 {
+		viewHeight = 1
+	}
+	m.config.SetSize(cw, viewHeight)
+	inner := strings.Join([]string{header, sep, m.config.View(), sep, footer}, "\n")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Background(modalBackground).
+		Width(cw + 2).
+		Render(inner)
+}
+
 // body renders the active tab's content at the given size, wrapping every
 // line with the frame borders. Logs shows the viewport; the other tabs are
 // centered placeholders until their phases land.
@@ -724,7 +817,7 @@ func (m Model) body(width, height int) string {
 			content = m.profiles.View()
 		}
 	case 2:
-		content = m.renderConfigTab(width, height)
+		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(renderKernelTab(m.state, m.kSelected, m.err, m.kConfirming))
 	default:
 		content = lipgloss.NewStyle().
 			Width(width).Height(height).
@@ -788,11 +881,11 @@ func renderKernelTab(state *supervisor.KernelState, selected int, err error, con
 	if state != nil && state.LastError != "" {
 		lines = append(lines, errorStyle.Render(state.LastError))
 	}
-	lines = append(lines, "", "kernel operations:")
-	for i, op := range kernelOps {
-		prefix, label := "  ", op.label
+	lines = append(lines, "", "config:")
+	for i, label := range configMenuEntries() {
+		prefix := "  "
 		if i == selected {
-			prefix, label = "> ", selectedStyle.Render(op.label)
+			prefix, label = "> ", selectedStyle.Render(label)
 		}
 		lines = append(lines, prefix+label)
 	}
@@ -800,21 +893,6 @@ func renderKernelTab(state *supervisor.KernelState, selected int, err error, con
 		lines = append(lines, "", errorStyle.Render("⚠ Recover 将重置 active config,确认执行? (y 确认 / 其他取消)"))
 	}
 	return strings.Join(lines, "\n")
-}
-
-// renderConfigTab composes the Config tab body: the kernel operation list on
-// top, then a mode header and the scrollable config viewport below.
-func (m Model) renderConfigTab(width, height int) string {
-	kernel := renderKernelTab(m.state, m.kSelected, m.err, m.kConfirming)
-	kernelLines := strings.Count(kernel, "\n") + 1
-	modeLine := "config (" + m.config.Mode() + "):"
-	configHeight := height - kernelLines - 1
-	if configHeight < 1 {
-		configHeight = 1
-	}
-	m.config.SetSize(width, configHeight)
-	content := strings.Join([]string{kernel, modeLine, m.config.View()}, "\n")
-	return lipgloss.NewStyle().Height(height).MaxHeight(height).Render(content)
 }
 
 // tabTitles are the tab names, one per index.
@@ -828,7 +906,7 @@ var helpByTab = [][]string{
 	// Profiles
 	{"1-3:tabs", "a:activate", "u:refresh", "d:delete", "i:import", "q:quit"},
 	// Config
-	{"1-3:tabs", "↑↓:select", "enter:run", "c:config", "q:quit"},
+	{"1-3:tabs", "↑↓:select", "enter:run", "q:quit"},
 }
 
 func tabHelp(active int) string {

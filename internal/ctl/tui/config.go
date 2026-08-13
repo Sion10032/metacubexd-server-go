@@ -40,6 +40,11 @@ func (c *ConfigModel) ToggleMode() {
 	c.loaded = false
 }
 
+// ResetScroll scrolls the viewport back to the top.
+func (c *ConfigModel) ResetScroll() {
+	c.viewport.GotoTop()
+}
+
 // SetSize resizes the viewport.
 func (c *ConfigModel) SetSize(width, height int) {
 	c.viewport.SetWidth(width)

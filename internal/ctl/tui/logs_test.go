@@ -259,8 +259,8 @@ func TestFollowIndicator(t *testing.T) {
 }
 
 // TestScrollOnEveryTab verifies PgDn scrolls the active viewport: the log
-// viewport on the Logs and Subscriptions tabs, and the config viewport on the
-// Config tab.
+// viewport on the Logs and Subscriptions tabs, and the config viewport in the
+// config viewer modal.
 func TestScrollOnEveryTab(t *testing.T) {
 	for _, tab := range []string{"1", "2"} {
 		t.Run("logs tab "+tab, func(t *testing.T) {
@@ -282,16 +282,18 @@ func TestScrollOnEveryTab(t *testing.T) {
 		})
 	}
 
-	t.Run("config tab 3", func(t *testing.T) {
+	t.Run("config viewer", func(t *testing.T) {
 		m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 		nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		nm, _ = nm.Update(configLoadedMsg{mode: configActive, content: strings.Repeat("line\n", 50)})
-		nm, _ = nm.Update(keyPress("3"))
+		mdl := nm.(Model)
+		mdl.viewingConfig = true
+		nm = mdl
 
 		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
-		mdl := nm.(Model)
+		mdl = nm.(Model)
 		if YOffset := mdl.config.viewport.YOffset(); YOffset == 0 {
-			t.Errorf("PgDn on tab 3 did not scroll the config viewport (YOffset=0)")
+			t.Errorf("PgDn in config viewer did not scroll the config viewport (YOffset=0)")
 		}
 	})
 }
