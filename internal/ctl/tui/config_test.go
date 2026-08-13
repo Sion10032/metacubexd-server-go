@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
 )
@@ -26,7 +26,7 @@ func TestConfigTabLoad(t *testing.T) {
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	nm, cmd := nm.Update(keyPress("3"))
 	if cmd == nil {
 		t.Fatal("entering Config tab returned no command")
 	}
@@ -39,7 +39,7 @@ func TestConfigTabLoad(t *testing.T) {
 	}
 
 	nm, _ = nm.Update(msg)
-	got := ansiRe.ReplaceAllString(nm.View(), "")
+	got := ansiRe.ReplaceAllString(nm.View().Content, "")
 	if !strings.Contains(got, "config (active):") {
 		t.Errorf("View missing config mode header:\n%s", got)
 	}
@@ -59,10 +59,10 @@ func TestConfigToggleKey(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	nm, _ := m.Update(keyPress("3"))
 	nm, _ = nm.Update(configLoadedMsg{mode: configActive, content: "active: true\n"})
 
-	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	nm, cmd := nm.Update(keyPress("c"))
 	if cmd == nil {
 		t.Fatal("c returned no command")
 	}

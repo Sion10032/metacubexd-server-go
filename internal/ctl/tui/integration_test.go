@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
 )
@@ -73,7 +73,7 @@ func TestSSEToView(t *testing.T) {
 	}
 
 	// The view renders the received lines, scrolled to the bottom.
-	if v := nm.View(); !strings.Contains(v, "line 2") {
+	if v := nm.View().Content; !strings.Contains(v, "line 2") {
 		t.Errorf("View missing last line:\n%s", v)
 	}
 
@@ -83,5 +83,4 @@ func TestSSEToView(t *testing.T) {
 	if _, ok := msg.(logClosedMsg); !ok {
 		t.Errorf("after cancel, pump = %T, want logClosedMsg", msg)
 	}
-	_ = tea.Msg(nil)
 }

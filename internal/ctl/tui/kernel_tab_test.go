@@ -7,10 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
 )
@@ -34,8 +32,6 @@ func runBatch(t *testing.T, cmd tea.Cmd) []tea.Msg {
 // TestKernelTabRender verifies the kernel tab lists every operation with the
 // selected entry highlighted.
 func TestKernelTabRender(t *testing.T) {
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	got := renderKernelTab(nil, 0, nil, false)
 	plain := ansiRe.ReplaceAllString(got, "")
@@ -52,16 +48,16 @@ func TestKernelTabRender(t *testing.T) {
 // TestKernelTabSelect verifies up/down move the selection with wraparound.
 func TestKernelTabSelect(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")}) // Config tab
+	nm, _ := m.Update(keyPress("3")) // Config tab
 
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyDown})
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyDown})
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if got := nm.(Model).kSelected; got != 2 {
 		t.Errorf("kSelected after 2x down = %d, want 2", got)
 	}
 
 	// up wraps to the last entry.
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyUp})
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if got := nm.(Model).kSelected; got != 1 {
 		t.Errorf("kSelected after up = %d, want 1", got)
 	}
@@ -79,9 +75,9 @@ func TestKernelTabExecute(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")}) // Config tab
+	nm, _ := m.Update(keyPress("3")) // Config tab
 
-	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter}) // enter on Start
+	nm, cmd := nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // enter on Start
 	if cmd == nil {
 		t.Fatal("enter returned no command")
 	}
@@ -106,26 +102,26 @@ func _TestRecoverConfirm(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")}) // Config tab
+	nm, _ := m.Update(keyPress("3")) // Config tab
 	for i := 0; i < 4; i++ {
-		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyDown})
+		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 
 	// Enter on Recover enters the confirm state instead of running it.
 	nm, _ = nm.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm, cmd := nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil {
 		t.Fatal("confirm state should not issue a command")
 	}
 	if !nm.(Model).kConfirming {
 		t.Fatal("kConfirming should be true")
 	}
-	if got := nm.View(); !strings.Contains(got, "确认执行") {
+	if got := nm.View().Content; !strings.Contains(got, "确认执行") {
 		t.Errorf("View missing confirm prompt:\n%s", got)
 	}
 
 	// "y" runs Recover.
-	nm, cmd = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	nm, cmd = nm.Update(keyPress("y"))
 	if cmd == nil {
 		t.Fatal("y returned no command")
 	}
@@ -136,11 +132,11 @@ func _TestRecoverConfirm(t *testing.T) {
 
 	// Any other key cancels without issuing a request.
 	gotURI = ""
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyDown})
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")}) // back to config
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	nm, cmd = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	nm, _ = m.Update(keyPress("3"))
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	nm, _ = nm.Update(keyPress("3")) // back to config
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	nm, cmd = nm.Update(keyPress("n"))
 	if cmd != nil {
 		t.Fatal("cancelling should not issue a command")
 	}
@@ -155,8 +151,8 @@ func _TestRecoverConfirm(t *testing.T) {
 // TestSpinnerTick verifies spinner ticks keep flowing while operating.
 func TestSpinnerTick(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
-	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter}) // Start
+	nm, _ := m.Update(keyPress("3"))
+	nm, cmd := nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // Start
 
 	// Batch returns the child commands; find the spinner tick among them.
 	msgs := runBatch(t, cmd)

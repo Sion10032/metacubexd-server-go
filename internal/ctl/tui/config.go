@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Config modes select which config the viewport shows.
@@ -22,7 +22,7 @@ type ConfigModel struct {
 
 // NewConfigModel returns an empty config viewport.
 func NewConfigModel() ConfigModel {
-	return ConfigModel{viewport: viewport.New(80, 20)}
+	return ConfigModel{viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))}
 }
 
 // Mode returns the label of the config currently selected.
@@ -42,8 +42,8 @@ func (c *ConfigModel) ToggleMode() {
 
 // SetSize resizes the viewport.
 func (c *ConfigModel) SetSize(width, height int) {
-	c.viewport.Width = width
-	c.viewport.Height = height
+	c.viewport.SetWidth(width)
+	c.viewport.SetHeight(height)
 }
 
 // SetContent replaces the viewport content and marks it loaded.
@@ -63,8 +63,8 @@ func (c *ConfigModel) Update(msg tea.Msg) tea.Cmd {
 func (c ConfigModel) View() string {
 	if !c.loaded {
 		return lipgloss.NewStyle().
-			Width(c.viewport.Width).
-			Height(c.viewport.Height).
+			Width(c.viewport.Width()).
+			Height(c.viewport.Height()).
 			Align(lipgloss.Center, lipgloss.Center).
 			Faint(true).
 			Render("— no config loaded —")

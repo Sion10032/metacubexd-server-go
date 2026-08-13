@@ -5,9 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
-
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/supervisor"
 )
@@ -16,8 +13,6 @@ import (
 func TestRenderStatus(t *testing.T) {
 	// lipgloss disables colors when the output is not a TTY; force a color
 	// profile so the ANSI assertion below is deterministic in CI.
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
 	pid := 12345
 	st := &supervisor.KernelState{
 		Status:             supervisor.StatusRunning,
@@ -50,8 +45,6 @@ func TestRenderStatus(t *testing.T) {
 // TestViewStatusBar drives the model with messages and checks the View shows
 // the status bar once a kernel state has been loaded, plus the error line.
 func TestViewStatusBar(t *testing.T) {
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	pid := 42
@@ -61,7 +54,7 @@ func TestViewStatusBar(t *testing.T) {
 		Version:            "v1.19.29",
 		ExternalController: "127.0.0.1:9090",
 	}})
-	got := nm.View()
+	got := nm.View().Content
 	for _, want := range []string{"running", "42", "v1.19.29"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("View = %q, missing %q", got, want)
@@ -69,13 +62,13 @@ func TestViewStatusBar(t *testing.T) {
 	}
 
 	nm, _ = nm.Update(statusErrorMsg{err: errors.New("connection refused")})
-	if got := nm.View(); !strings.Contains(got, "connection refused") {
+	if got := nm.View().Content; !strings.Contains(got, "connection refused") {
 		t.Errorf("View with error = %q, want error message", got)
 	}
 
 	// A 401 shows the friendly auth hint instead of the raw error.
 	nm, _ = nm.Update(statusErrorMsg{err: ctl.ErrUnauthorized})
-	if got := nm.View(); !strings.Contains(got, "认证失败") {
+	if got := nm.View().Content; !strings.Contains(got, "认证失败") {
 		t.Errorf("View with 401 = %q, want auth hint", got)
 	}
 }

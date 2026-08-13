@@ -4,9 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"metacubexd-server-go/internal/ctl"
 )
@@ -14,11 +13,9 @@ import (
 // TestViewLayout verifies the full layout renders the status bar, the tab bar
 // and the help line.
 func TestViewLayout(t *testing.T) {
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	got := ansiRe.ReplaceAllString(m.View(), "")
+	got := ansiRe.ReplaceAllString(m.View().Content, "")
 	for _, want := range []string{"[1] Logs", "[2] Subscriptions", "[3] Config", "/:filter", "f:follow(ON)", "q:quit"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("View = %q, missing %q", got, want)
@@ -32,13 +29,13 @@ func TestTabHelp(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 
 	// Logs tab: filter/follow.
-	if got := m.View(); !strings.Contains(got, "/:filter") {
+	if got := m.View().Content; !strings.Contains(got, "/:filter") {
 		t.Errorf("Logs footer missing filter: %q", got)
 	}
 
 	// Profiles tab: profile operations.
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
-	got := nm.View()
+	nm, _ := m.Update(keyPress("2"))
+	got := nm.View().Content
 	for _, want := range []string{"a:activate", "u:refresh", "d:delete", "i:import"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Profiles footer missing %q:\n%s", want, got)
@@ -49,8 +46,8 @@ func TestTabHelp(t *testing.T) {
 	}
 
 	// Config tab: kernel selection.
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
-	if got := nm.View(); !strings.Contains(got, "enter:run") {
+	nm, _ = nm.Update(keyPress("3"))
+	if got := nm.View().Content; !strings.Contains(got, "enter:run") {
 		t.Errorf("Config footer missing enter:run:\n%s", got)
 	}
 }
@@ -60,13 +57,13 @@ func TestTabHelp(t *testing.T) {
 func TestTabSwitch(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
-	if got := nm.View(); !strings.Contains(got, "Name") {
+	nm, _ := m.Update(keyPress("2"))
+	if got := nm.View().Content; !strings.Contains(got, "Name") {
 		t.Errorf("View after tab 2 = %q, want profiles table", got)
 	}
 
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
-	if got := nm.View(); !strings.Contains(got, "waiting for log stream") && !strings.Contains(got, "[1] Logs") {
+	nm, _ = nm.Update(keyPress("1"))
+	if got := nm.View().Content; !strings.Contains(got, "waiting for log stream") && !strings.Contains(got, "[1] Logs") {
 		t.Errorf("View after tab 1 = %q, want log viewport", got)
 	}
 }
@@ -78,7 +75,7 @@ func TestWindowResize(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	lines := strings.Split(strings.TrimRight(nm.View(), "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(nm.View().Content, "\n"), "\n")
 	if len(lines) != 24 {
 		t.Errorf("layout = %d lines, want 24 (fills the window)", len(lines))
 	}
@@ -105,7 +102,7 @@ func TestNarrowScreen(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
 	nm, _ = nm.Update(logMsg{line: "hello narrow"})
 
-	got := nm.View()
+	got := nm.View().Content
 	if strings.Contains(got, "┌") {
 		t.Errorf("narrow view should skip the frame, got: %q", got)
 	}
@@ -115,7 +112,7 @@ func TestNarrowScreen(t *testing.T) {
 
 	// Wide enough windows keep the frame.
 	nm, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
-	if got := nm.View(); !strings.Contains(got, "┌─ mihomo-tui") {
+	if got := nm.View().Content; !strings.Contains(got, "┌─ mihomo-tui") {
 		t.Errorf("wide view should keep the frame: %q", got)
 	}
 }

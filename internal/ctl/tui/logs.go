@@ -3,9 +3,9 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // maxLogLines caps the retained log lines to bound memory; the viewport only
@@ -24,7 +24,7 @@ type LogsModel struct {
 // a placeholder until WindowSizeMsg sets the real one (1.30).
 func NewLogsModel() LogsModel {
 	return LogsModel{
-		viewport: viewport.New(80, 20),
+		viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		follow:   true,
 	}
 }
@@ -33,8 +33,8 @@ func NewLogsModel() LogsModel {
 // the bottom so the latest lines stay visible after a resize — without this,
 // the scroll offset computed at the old height leaves blank space below.
 func (l *LogsModel) SetSize(width, height int) {
-	l.viewport.Width = width
-	l.viewport.Height = height
+	l.viewport.SetWidth(width)
+	l.viewport.SetHeight(height)
 	if l.follow {
 		l.viewport.GotoBottom()
 	}
@@ -95,8 +95,8 @@ func stripANSI(s string) string {
 func (l LogsModel) View() string {
 	if len(l.allLines) == 0 {
 		return lipgloss.NewStyle().
-			Width(l.viewport.Width).
-			Height(l.viewport.Height).
+			Width(l.viewport.Width()).
+			Height(l.viewport.Height()).
 			Align(lipgloss.Center, lipgloss.Center).
 			Faint(true).
 			Render("— waiting for log stream —")

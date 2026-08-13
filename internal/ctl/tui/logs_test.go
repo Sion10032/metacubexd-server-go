@@ -6,9 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/supervisor"
@@ -130,35 +128,35 @@ func TestLogsCap(t *testing.T) {
 func TestFilterInput(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	nm, _ := m.Update(keyPress("/"))
 	if !nm.(Model).filtering {
 		t.Fatal("filtering should be true after /")
 	}
 
 	for _, r := range "err" {
-		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+		nm, _ = nm.Update(keyPress(string(r)))
 	}
 	if got := nm.(Model).filterInput; got != "err" {
 		t.Errorf("filterInput = %q, want err", got)
 	}
 
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mdl := nm.(Model)
 	if mdl.filtering || mdl.logs.filter != "err" {
 		t.Errorf("after enter: filtering=%v filter=%q", mdl.filtering, mdl.logs.filter)
 	}
 
 	// Re-entering prefills the current filter so it can be edited or cleared.
-	nm, _ = mdl.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	nm, _ = mdl.Update(keyPress("/"))
 	if got := nm.(Model).filterInput; got != "err" {
 		t.Errorf("filterInput after / = %q, want prefilled err", got)
 	}
 
 	// Delete to empty and enter clears the filter.
 	for i := 0; i < 3; i++ {
-		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	}
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mdl = nm.(Model)
 	if mdl.logs.filter != "" {
 		t.Errorf("filter after clear = %q, want empty", mdl.logs.filter)
@@ -168,16 +166,16 @@ func TestFilterInput(t *testing.T) {
 	}
 
 	// backspace deletes one character from a fresh input.
-	nm, _ = mdl.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	nm, _ = mdl.Update(keyPress("/"))
+	nm, _ = nm.Update(keyPress("x"))
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if got := nm.(Model).filterInput; got != "" {
 		t.Errorf("filterInput after backspace = %q, want empty", got)
 	}
 
 	// esc cancels without applying.
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	nm, _ = nm.Update(keyPress("z"))
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	mdl = nm.(Model)
 	if mdl.filtering || mdl.logs.filter != "" {
 		t.Errorf("after esc: filtering=%v filter=%q (should keep empty)", mdl.filtering, mdl.logs.filter)
@@ -193,11 +191,11 @@ func TestFilterAppliesToHistory(t *testing.T) {
 	nm, _ = nm.Update(logMsg{line: "error: bad thing"})
 
 	// Apply a filter through the input flow.
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	nm, _ = nm.Update(keyPress("/"))
 	for _, r := range "error" {
-		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+		nm, _ = nm.Update(keyPress(string(r)))
 	}
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	mdl := nm.(Model)
 	if mdl.logs.filter != "error" {
@@ -206,7 +204,7 @@ func TestFilterAppliesToHistory(t *testing.T) {
 	if len(mdl.logs.allLines) != 2 {
 		t.Errorf("history = %d, want 2 (full history retained)", len(mdl.logs.allLines))
 	}
-	if got := mdl.View(); strings.Contains(got, "normal line") {
+	if got := mdl.View().Content; strings.Contains(got, "normal line") {
 		t.Errorf("View still shows filtered-out history:\n%s", got)
 	}
 }
@@ -223,8 +221,9 @@ func TestMouseWheelScroll(t *testing.T) {
 		nm, _ = nm.Update(logMsg{line: fmt.Sprintf("scroll line %d", i)})
 	}
 
-	nm, _ = nm.Update(tea.MouseMsg{Type: tea.MouseWheelDown, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
-	if got := nm.(Model).logs.viewport.YOffset; got <= 0 {
+	nm, _ = nm.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	mdl = nm.(Model)
+	if got := mdl.logs.viewport.YOffset(); got <= 0 {
 		t.Errorf("wheel down did not scroll (YOffset=%d)", got)
 	}
 }
@@ -236,11 +235,11 @@ func TestFollowToggle(t *testing.T) {
 		t.Fatal("follow should default to true")
 	}
 
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	nm, _ := m.Update(keyPress("f"))
 	if nm.(Model).logs.follow {
 		t.Error("follow should be false after f")
 	}
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
+	nm, _ = nm.Update(keyPress("f"))
 	if !nm.(Model).logs.follow {
 		t.Error("follow should be true after f again")
 	}
@@ -249,12 +248,12 @@ func TestFollowToggle(t *testing.T) {
 // TestFollowIndicator verifies the help line shows the follow state.
 func TestFollowIndicator(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	if got := m.View(); !strings.Contains(got, "f:follow(ON)") {
+	if got := m.View().Content; !strings.Contains(got, "f:follow(ON)") {
 		t.Errorf("View = %q, want follow(ON)", got)
 	}
 
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f")})
-	if got := nm.View(); !strings.Contains(got, "f:follow(OFF)") {
+	nm, _ := m.Update(keyPress("f"))
+	if got := nm.View().Content; !strings.Contains(got, "f:follow(OFF)") {
 		t.Errorf("View = %q, want follow(OFF)", got)
 	}
 }
@@ -273,10 +272,11 @@ func TestScrollOnEveryTab(t *testing.T) {
 			for i := 0; i < 50; i++ {
 				nm, _ = nm.Update(logMsg{line: fmt.Sprintf("scroll line %d", i)})
 			}
-			nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tab)})
+			nm, _ = nm.Update(keyPress(tab))
 
-			nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-			if YOffset := nm.(Model).logs.viewport.YOffset; YOffset == 0 {
+			nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+			mdl = nm.(Model)
+			if YOffset := mdl.logs.viewport.YOffset(); YOffset == 0 {
 				t.Errorf("PgDn on tab %s did not scroll the log viewport (YOffset=0)", tab)
 			}
 		})
@@ -286,10 +286,11 @@ func TestScrollOnEveryTab(t *testing.T) {
 		m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 		nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		nm, _ = nm.Update(configLoadedMsg{mode: configActive, content: strings.Repeat("line\n", 50)})
-		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+		nm, _ = nm.Update(keyPress("3"))
 
-		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-		if YOffset := nm.(Model).config.viewport.YOffset; YOffset == 0 {
+		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+		mdl := nm.(Model)
+		if YOffset := mdl.config.viewport.YOffset(); YOffset == 0 {
 			t.Errorf("PgDn on tab 3 did not scroll the config viewport (YOffset=0)")
 		}
 	})
@@ -306,11 +307,11 @@ func TestViewportScroll(t *testing.T) {
 		nm, _ = nm.Update(logMsg{line: fmt.Sprintf("scroll line %d", i)})
 	}
 
-	if got := nm.View(); !strings.Contains(got, "scroll line 0") {
+	if got := nm.View().Content; !strings.Contains(got, "scroll line 0") {
 		t.Errorf("initial view missing first line:\n%s", got)
 	}
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyPgDown})
-	got := nm.View()
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	got := nm.View().Content
 	if strings.Contains(got, "scroll line 0") || !strings.Contains(got, "scroll line 17") {
 		t.Errorf("PgDn did not scroll the viewport:\n%s", got)
 	}
@@ -341,14 +342,12 @@ func TestSetSizeFollowsBottom(t *testing.T) {
 // TestViewLogStream drives the model with a log line and verifies it appears
 // in the view and the waiting hint disappears.
 func TestViewLogStream(t *testing.T) {
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	nm, _ = nm.Update(logMsg{line: "hello kernel"})
 
-	got := ansiRe.ReplaceAllString(nm.View(), "")
+	got := ansiRe.ReplaceAllString(nm.View().Content, "")
 	if !strings.Contains(got, "hello kernel") {
 		t.Errorf("View = %q, missing log line", got)
 	}

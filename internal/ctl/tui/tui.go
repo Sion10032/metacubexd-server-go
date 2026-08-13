@@ -10,10 +10,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/profile"
@@ -164,11 +164,11 @@ func newImportForm() importForm {
 	url := textinput.New()
 	url.Prompt = "URL:  "
 	url.Placeholder = "https://example.com/sub.yaml"
-	url.Width = 50
+	url.SetWidth(50)
 	name := textinput.New()
 	name.Prompt = "Name: "
 	name.Placeholder = "(optional)"
-	name.Width = 50
+	name.SetWidth(50)
 	return importForm{url: url, name: name}
 }
 
@@ -177,7 +177,7 @@ func newImportForm() importForm {
 // textinput.
 func (m Model) updateImport(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
 			m.importing = false
@@ -313,7 +313,7 @@ func statusTick() tea.Cmd {
 // Update handles messages and key presses.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		key := msg.String()
 		if m.filtering {
 			m = m.updateFilter(key)
@@ -575,7 +575,7 @@ func (m Model) updateKernelKeys(key string) (Model, tea.Cmd) {
 		m.kSelected = (m.kSelected + len(kernelOps) - 1) % len(kernelOps)
 	case "down", "j":
 		m.kSelected = (m.kSelected + 1) % len(kernelOps)
-	case "enter", " ":
+	case "enter", "space":
 		op := kernelOps[m.kSelected]
 		if op.label == "Recover" {
 			m.kConfirming = true
@@ -593,16 +593,26 @@ func (m Model) startKernelOp(op kernelOp) (Model, tea.Cmd) {
 	return m, tea.Batch(kernelOpCmd(m.client, op.op), m.spinner.Tick)
 }
 
-// View renders the framed layout: bordered box with a title, status bar, tab
-// bar, active tab body and the key binding help line. The frame fills the
-// whole terminal window. Narrow screens (under narrowWidth columns) get the
-// bare log stream instead — no frame, no tabs.
-func (m Model) View() string {
+// View returns the rendered layout as a tea.View with mouse support enabled.
+// Narrow screens (under narrowWidth columns) get the bare log stream instead
+// of the frame — no frame, no tabs.
+func (m Model) View() tea.View {
+	var content string
 	if m.width > 0 && m.width < narrowWidth {
 		m.logs.SetSize(m.width, m.height)
-		return m.logs.View()
+		content = m.logs.View()
+	} else {
+		content = m.frameView()
 	}
+	v := tea.NewView(content)
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
 
+// frameView renders the framed layout: bordered box with a title, status bar,
+// tab bar, active tab body and the key binding help line. The frame fills the
+// whole terminal window.
+func (m Model) frameView() string {
 	w, h := m.width, m.height
 	if w < minWidth {
 		w = minWidth

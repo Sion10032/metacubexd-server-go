@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/profile"
@@ -18,6 +18,7 @@ import (
 // profile, and SelectedID follows the cursor.
 func TestProfilesSetRows(t *testing.T) {
 	p := NewProfilesModel()
+	p.SetSize(80, 10)
 	list := []profile.Meta{
 		{ID: "a", Name: "base", Type: "local", UpdatedAt: 1723456789000},
 		{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1723456789000},
@@ -54,12 +55,12 @@ func TestProfilesTabLoaded(t *testing.T) {
 	mdl.profActive = "b"
 	nm = mdl
 
-	if got := nm.View(); !strings.Contains(got, "active: sub (remote)") {
+	if got := nm.View().Content; !strings.Contains(got, "active: sub (remote)") {
 		t.Errorf("View missing active profile summary:\n%s", got)
 	}
 
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
-	got := ansiRe.ReplaceAllString(nm.View(), "")
+	nm, _ = nm.Update(keyPress("2"))
+	got := ansiRe.ReplaceAllString(nm.View().Content, "")
 	if !strings.Contains(got, "sub") || !strings.Contains(got, "●") {
 		t.Errorf("profiles tab missing table content:\n%s", got)
 	}
@@ -78,9 +79,9 @@ func TestProfileActivateKey(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")}) // Profiles tab
+	nm, _ = nm.Update(keyPress("2")) // Profiles tab
 
-	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	nm, cmd := nm.Update(keyPress("a"))
 	if cmd == nil {
 		t.Fatal("a returned no command")
 	}
@@ -107,9 +108,9 @@ func TestProfileRefreshKey(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	nm, _ = nm.Update(keyPress("2"))
 
-	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	nm, cmd := nm.Update(keyPress("u"))
 	if cmd == nil {
 		t.Fatal("u returned no command")
 	}
@@ -135,20 +136,20 @@ func TestProfileDeleteConfirm(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	nm, _ = nm.Update(keyPress("2"))
 
-	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	nm, cmd := nm.Update(keyPress("d"))
 	if cmd != nil {
 		t.Fatal("d should enter confirm state, not issue a command")
 	}
 	if !nm.(Model).confirmDel {
 		t.Fatal("confirmDel should be true after d")
 	}
-	if got := nm.View(); !strings.Contains(got, "删除所选 profile") {
+	if got := nm.View().Content; !strings.Contains(got, "删除所选 profile") {
 		t.Errorf("View missing delete prompt:\n%s", got)
 	}
 
-	nm, cmd = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	nm, cmd = nm.Update(keyPress("y"))
 	if cmd == nil {
 		t.Fatal("y returned no command")
 	}
@@ -160,8 +161,8 @@ func TestProfileDeleteConfirm(t *testing.T) {
 	// Any other key cancels without issuing a request.
 	gotURI = ""
 	nm, _ = nm.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	nm, cmd = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	nm, _ = nm.Update(keyPress("d"))
+	nm, cmd = nm.Update(keyPress("n"))
 	if cmd != nil {
 		t.Fatal("cancelling should not issue a command")
 	}
@@ -188,15 +189,15 @@ func TestProfileImportInput(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")}) // Subscriptions tab
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	nm, _ = nm.Update(keyPress("2")) // Subscriptions tab
+	nm, _ = nm.Update(keyPress("i"))
 	if !nm.(Model).importing {
 		t.Fatal("importing should be true after i")
 	}
 	if nm.(Model).form.focus != 0 {
 		t.Fatalf("initial focus = %d, want 0 (URL)", nm.(Model).form.focus)
 	}
-	if got := ansiRe.ReplaceAllString(nm.View(), ""); !strings.Contains(got, "Import subscription") {
+	if got := ansiRe.ReplaceAllString(nm.View().Content, ""); !strings.Contains(got, "Import subscription") {
 		t.Errorf("View missing import popup:\n%s", got)
 	}
 	formView := ansiRe.ReplaceAllString(nm.(Model).importFormView(60, 10), "")
@@ -207,25 +208,25 @@ func TestProfileImportInput(t *testing.T) {
 	}
 
 	for _, r := range "https://example.com/sub" {
-		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+		nm, _ = nm.Update(keyPress(string(r)))
 	}
 	if got := nm.(Model).form.url.Value(); got != "https://example.com/sub" {
 		t.Errorf("url = %q, want the typed URL", got)
 	}
 
 	// tab moves focus to the name field.
-	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyTab})
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if nm.(Model).form.focus != 1 {
 		t.Fatalf("focus after tab = %d, want 1 (Name)", nm.(Model).form.focus)
 	}
 	for _, r := range "my-sub" {
-		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+		nm, _ = nm.Update(keyPress(string(r)))
 	}
 	if got := nm.(Model).form.name.Value(); got != "my-sub" {
 		t.Errorf("name = %q, want the typed name", got)
 	}
 
-	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm, cmd := nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("enter returned no command")
 	}

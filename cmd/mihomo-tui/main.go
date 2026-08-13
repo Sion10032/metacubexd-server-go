@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui"
@@ -38,9 +38,7 @@ func main() {
 		log.Fatalf("mihomo-tui: cannot reach %s: %v", *endpoint, err)
 	}
 
-	// Mouse support lets the program capture wheel events and scroll the log
-	// viewport instead of the terminal scrolling its own buffer.
-	if _, err := tea.NewProgram(tui.New(client), tea.WithMouseCellMotion()).Run(); err != nil {
+	if _, err := tea.NewProgram(tui.New(client)).Run(); err != nil {
 		log.Fatalf("mihomo-tui: %v", err)
 	}
 }

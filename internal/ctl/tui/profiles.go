@@ -3,8 +3,8 @@ package tui
 import (
 	"time"
 
-	"github.com/charmbracelet/bubbles/table"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/profile"
 )
