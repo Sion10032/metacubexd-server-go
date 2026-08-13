@@ -7,18 +7,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"metacubexd-server-go/internal/ctl/tui/components"
 	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
-// importForm bundles the two textinputs of the import popup.
-type importForm struct {
-	url   textinput.Model
-	name  textinput.Model
-	focus int // 0 = URL, 1 = Name
-}
-
 // newImportForm builds an import popup with the URL field focused.
-func newImportForm() importForm {
+func newImportForm() components.Form {
 	url := textinput.New()
 	url.Prompt = "URL:  "
 	url.Placeholder = "https://example.com/sub.yaml"
@@ -27,7 +21,7 @@ func newImportForm() importForm {
 	name.Prompt = "Name: "
 	name.Placeholder = "(optional)"
 	name.SetWidth(50)
-	return importForm{url: url, name: name}
+	return components.NewForm(url, name)
 }
 
 // updateConfirmDel handles the delete-confirmation prompt: y confirms the
@@ -72,7 +66,7 @@ func (m Model) updateProfilesKeys(key string, msg tea.Msg) (Model, tea.Cmd) {
 	case "i":
 		m.importing = true
 		m.form = newImportForm()
-		return m, m.form.url.Focus()
+		return m, m.form.Fields[0].Focus()
 	default:
 		// Selection keys drive the table; scroll keys fall through to the log
 		// viewport.
@@ -93,35 +87,22 @@ func (m Model) updateImport(msg tea.Msg) (Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			m.importing = false
-			m.form.url.Reset()
-			m.form.name.Reset()
+			m.form.Fields[0].Reset()
+			m.form.Fields[1].Reset()
 			return m, nil
-		case "tab":
-			m.form.focus = 1 - m.form.focus
-			if m.form.focus == 0 {
-				m.form.name.Blur()
-				return m, m.form.url.Focus()
-			}
-			m.form.url.Blur()
-			return m, m.form.name.Focus()
 		case "enter":
-			url := strings.TrimSpace(m.form.url.Value())
-			name := strings.TrimSpace(m.form.name.Value())
+			url := strings.TrimSpace(m.form.Fields[0].Value())
+			name := strings.TrimSpace(m.form.Fields[1].Value())
 			m.importing = false
-			m.form.url.Reset()
-			m.form.name.Reset()
+			m.form.Fields[0].Reset()
+			m.form.Fields[1].Reset()
 			if url == "" {
 				return m, nil
 			}
 			return m, importCmd(m.client, url, name)
 		default:
-			if m.form.focus == 0 {
-				var cmd tea.Cmd
-				m.form.url, cmd = m.form.url.Update(msg)
-				return m, cmd
-			}
 			var cmd tea.Cmd
-			m.form.name, cmd = m.form.name.Update(msg)
+			m.form, cmd = m.form.Update(msg)
 			return m, cmd
 		}
 	}
@@ -138,8 +119,8 @@ func (m Model) importFormView(width, height int) string {
 		shared.FrameTop(cw, "", ""),
 		shared.FrameRow(header, cw),
 		shared.FrameSep(cw),
-		shared.FrameRow(m.form.url.View(), cw),
-		shared.FrameRow(m.form.name.View(), cw),
+		shared.FrameRow(m.form.Fields[0].View(), cw),
+		shared.FrameRow(m.form.Fields[1].View(), cw),
 		shared.FrameSep(cw),
 		shared.FrameRow("tab:switch  enter:import  esc:cancel", cw),
 		shared.FrameBottom(cw),

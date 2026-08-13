@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/components"
 	"metacubexd-server-go/internal/ctl/tui/shared"
 	"metacubexd-server-go/internal/supervisor"
 )
@@ -24,7 +25,7 @@ type KernelModel struct {
 	editField      int
 	editInput      textinput.Model
 	editingSection bool
-	sectionForm    sectionForm
+	sectionForm    components.Form
 }
 
 // NewKernelModel returns an empty Config tab model.

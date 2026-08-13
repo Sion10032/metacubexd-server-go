@@ -5,27 +5,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"metacubexd-server-go/internal/ctl/tui/shared"
+	"metacubexd-server-go/internal/ctl/tui/components"
 )
-
-// overlayModal centers modal over base using lipgloss's compositor, so the
-// styled modal draws on top of the styled frame without mangling ANSI codes.
-func overlayModal(base, modal string, w, h int) string {
-	mw, mh := lipgloss.Width(modal), lipgloss.Height(modal)
-	x := (w - mw) / 2
-	if x < 0 {
-		x = 0
-	}
-	y := (h - mh) / 2
-	if y < 0 {
-		y = 0
-	}
-	comp := lipgloss.NewCompositor(
-		lipgloss.NewLayer(base),
-		lipgloss.NewLayer(modal).X(x).Y(y).Z(1),
-	)
-	return comp.Render()
-}
 
 // configModal renders the bordered config viewer modal for the given terminal
 // size: a bold header, the scrollable config viewport, and a key-hint footer.
@@ -47,11 +28,7 @@ func (m Model) configModal(w, h int) string {
 	}
 	m.config.SetSize(cw, viewHeight)
 	inner := strings.Join([]string{header, sep, m.config.View(), sep, footer}, "\n")
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Background(shared.ModalBackground).
-		Width(cw + 2).
-		Render(inner)
+	return components.BorderedModal(inner, cw)
 }
 
 // sectionFormView renders the section editor popup: key and value textinputs
@@ -65,16 +42,12 @@ func (m Model) sectionFormView() string {
 	inner := strings.Join([]string{
 		header,
 		sep,
-		m.kernel.sectionForm.key.View(),
-		m.kernel.sectionForm.value.View(),
+		m.kernel.sectionForm.Fields[0].View(),
+		m.kernel.sectionForm.Fields[1].View(),
 		sep,
 		footer,
 	}, "\n")
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Background(shared.ModalBackground).
-		Width(cw + 2).
-		Render(inner)
+	return components.BorderedModal(inner, cw)
 }
 
 // editInputView renders the network field editor popup: a single prefilled
@@ -86,9 +59,5 @@ func (m Model) editInputView() string {
 	sep := strings.Repeat("─", cw)
 	footer := lipgloss.NewStyle().Width(cw).Align(lipgloss.Center).Render("enter:save  esc:cancel")
 	inner := strings.Join([]string{header, sep, m.kernel.editInput.View(), sep, footer}, "\n")
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Background(shared.ModalBackground).
-		Width(cw + 2).
-		Render(inner)
+	return components.BorderedModal(inner, cw)
 }
