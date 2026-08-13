@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
 // TestConfigMenu verifies the Config tab lists the kernel operations, the
@@ -20,7 +21,7 @@ func TestConfigMenu(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	nm, _ = nm.Update(keyPress("3"))
 
-	got := ansiRe.ReplaceAllString(nm.View().Content, "")
+	got := shared.ANSIRe.ReplaceAllString(nm.View().Content, "")
 	for _, want := range []string{"Start", "Stop", "Restart", "mixed-port", "http-port", "socks-port", "tun-enable", "tun-device", "tun-stack", "View YAML"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Config tab = %q, missing %q", got, want)
@@ -63,7 +64,7 @@ func TestConfigViewerOpen(t *testing.T) {
 	}
 
 	nm, _ = nm.Update(msg)
-	got := ansiRe.ReplaceAllString(nm.View().Content, "")
+	got := shared.ANSIRe.ReplaceAllString(nm.View().Content, "")
 	if !strings.Contains(got, "View Config (active)") {
 		t.Errorf("View missing config modal header:\n%s", got)
 	}

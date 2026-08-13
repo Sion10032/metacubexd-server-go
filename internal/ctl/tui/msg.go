@@ -1,44 +1,8 @@
 package tui
 
 import (
-	"context"
-
-	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/profile"
-	"metacubexd-server-go/internal/supervisor"
 )
-
-// statusLoadedMsg carries a fresh kernel state from the control API.
-type statusLoadedMsg struct {
-	state supervisor.KernelState
-}
-
-// statusErrorMsg carries a control API failure (connection, auth, ...).
-type statusErrorMsg struct {
-	err error
-}
-
-// tickMsg fires once per second to refresh the kernel status.
-type tickMsg struct{}
-
-// subscribedMsg carries the live SSE log stream and its cancellation func.
-type subscribedMsg struct {
-	ch     <-chan ctl.Event
-	cancel context.CancelFunc
-}
-
-// logMsg carries one formatted kernel log line.
-type logMsg struct {
-	line string
-}
-
-// stateMsg carries a kernel state pushed over SSE.
-type stateMsg struct {
-	state supervisor.KernelState
-}
-
-// logClosedMsg fires when the SSE log stream ends.
-type logClosedMsg struct{}
 
 // profilesLoadedMsg carries the fetched profile list.
 type profilesLoadedMsg struct {

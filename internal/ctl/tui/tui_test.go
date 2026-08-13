@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
 // TestViewLayout verifies the full layout renders the status bar, the tab bar
@@ -15,7 +16,7 @@ import (
 func TestViewLayout(t *testing.T) {
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	got := ansiRe.ReplaceAllString(m.View().Content, "")
+	got := shared.ANSIRe.ReplaceAllString(m.View().Content, "")
 	for _, want := range []string{"[1] Logs", "[2] Subscriptions", "[3] Config", "/:filter", "f:follow(ON)", "q:quit"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("View = %q, missing %q", got, want)
@@ -95,12 +96,12 @@ func TestWindowResize(t *testing.T) {
 	}
 }
 
-// TestNarrowScreen verifies a terminal under narrowWidth columns renders the
+// TestNarrowScreen verifies a terminal under shared.NarrowWidth columns renders the
 // bare log stream without the frame or tabs.
 func TestNarrowScreen(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 50, Height: 20})
-	nm, _ = nm.Update(logMsg{line: "hello narrow"})
+	nm, _ = nm.Update(shared.LogLineMsg{Line: "hello narrow"})
 
 	got := nm.View().Content
 	if strings.Contains(got, "┌") {

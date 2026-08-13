@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
 // body renders the active tab's content at the given size, wrapping every
@@ -35,7 +37,7 @@ func (m Model) body(width, height int) string {
 		// MaxWidth guards against wide/emoji content overflowing the right
 		// border when the computed width and the terminal's rendering differ.
 		clipped := lipgloss.NewStyle().MaxWidth(width).Render(l)
-		lines[i] = frameRow(clipped, width)
+		lines[i] = shared.FrameRow(clipped, width)
 	}
 	return strings.Join(lines, "\n")
 }

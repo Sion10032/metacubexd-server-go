@@ -6,6 +6,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
 // importForm bundles the two textinputs of the import popup.
@@ -133,14 +135,14 @@ func (m Model) importFormView(width, height int) string {
 	const cw = 60 // modal content width
 	header := lipgloss.NewStyle().Bold(true).Width(cw).Align(lipgloss.Center).Render("Import subscription")
 	content := strings.Join([]string{
-		frameTop(cw, "", ""),
-		frameRow(header, cw),
-		frameSep(cw),
-		frameRow(m.form.url.View(), cw),
-		frameRow(m.form.name.View(), cw),
-		frameSep(cw),
-		frameRow("tab:switch  enter:import  esc:cancel", cw),
-		frameBottom(cw),
+		shared.FrameTop(cw, "", ""),
+		shared.FrameRow(header, cw),
+		shared.FrameSep(cw),
+		shared.FrameRow(m.form.url.View(), cw),
+		shared.FrameRow(m.form.name.View(), cw),
+		shared.FrameSep(cw),
+		shared.FrameRow("tab:switch  enter:import  esc:cancel", cw),
+		shared.FrameBottom(cw),
 	}, "\n")
 	return lipgloss.NewStyle().
 		Width(width).Height(height).

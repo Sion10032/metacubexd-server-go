@@ -1,21 +1,12 @@
 package tui
 
 import (
-	"time"
-
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
-
-// requestBackgroundColorCmd asks the terminal for its background color so the
-// theme can adapt to dark/light.
-func requestBackgroundColorCmd() tea.Cmd {
-	return func() tea.Msg {
-		return tea.RequestBackgroundColor()
-	}
-}
 
 // fetchProfilesCmd loads the profile list once.
 func fetchProfilesCmd(c *ctl.Client) tea.Cmd {
@@ -63,35 +54,17 @@ func importCmd(c *ctl.Client, url, name string) tea.Cmd {
 	}
 }
 
-// fetchStatusCmd fetches the kernel status once.
-func fetchStatusCmd(c *ctl.Client) tea.Cmd {
-	return func() tea.Msg {
-		st, err := c.KernelStatus()
-		if err != nil {
-			return statusErrorMsg{err: err}
-		}
-		return statusLoadedMsg{state: st}
-	}
-}
-
-// statusTick schedules the next status refresh one second from now.
-func statusTick() tea.Cmd {
-	return tea.Tick(time.Second, func(time.Time) tea.Msg {
-		return tickMsg{}
-	})
-}
-
 // updateStatus handles the kernel status messages: fresh states, errors and
 // the periodic tick; the spinner keeps animating while an operation runs.
 func (m Model) updateStatus(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case statusLoadedMsg:
-		m.state = &msg.state
+	case shared.StatusLoadedMsg:
+		m.state = &msg.State
 		m.kernel.operating = false
 		m.kernel.kConfirming = false
 		return m, nil
-	case statusErrorMsg:
-		m.err = msg.err
+	case shared.StatusErrorMsg:
+		m.err = msg.Err
 		m.kernel.operating = false
 		m.kernel.kConfirming = false
 		return m, nil
@@ -102,8 +75,8 @@ func (m Model) updateStatus(msg tea.Msg) (Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, nil
-	case tickMsg:
-		return m, tea.Batch(fetchStatusCmd(m.client), statusTick())
+	case shared.TickMsg:
+		return m, tea.Batch(shared.FetchStatus(m.client), shared.StatusTick())
 	}
 	return m, nil
 }

@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
 // overlayModal centers modal over base using lipgloss's compositor, so the
@@ -47,7 +49,7 @@ func (m Model) configModal(w, h int) string {
 	inner := strings.Join([]string{header, sep, m.config.View(), sep, footer}, "\n")
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		Background(modalBackground).
+		Background(shared.ModalBackground).
 		Width(cw + 2).
 		Render(inner)
 }
@@ -70,7 +72,7 @@ func (m Model) sectionFormView() string {
 	}, "\n")
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		Background(modalBackground).
+		Background(shared.ModalBackground).
 		Width(cw + 2).
 		Render(inner)
 }
@@ -86,7 +88,7 @@ func (m Model) editInputView() string {
 	inner := strings.Join([]string{header, sep, m.kernel.editInput.View(), sep, footer}, "\n")
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		Background(modalBackground).
+		Background(shared.ModalBackground).
 		Width(cw + 2).
 		Render(inner)
 }

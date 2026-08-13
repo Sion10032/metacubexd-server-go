@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 	"metacubexd-server-go/internal/profile"
 )
 
@@ -24,7 +25,7 @@ func TestProfilesSetRows(t *testing.T) {
 		{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1723456789000},
 	}
 	p.SetProfiles(list, "b")
-	got := ansiRe.ReplaceAllString(p.View(), "")
+	got := shared.ANSIRe.ReplaceAllString(p.View(), "")
 	if !strings.Contains(got, "base") || !strings.Contains(got, "sub") {
 		t.Errorf("table view missing profile names:\n%s", got)
 	}
@@ -60,7 +61,7 @@ func TestProfilesTabLoaded(t *testing.T) {
 	}
 
 	nm, _ = nm.Update(keyPress("2"))
-	got := ansiRe.ReplaceAllString(nm.View().Content, "")
+	got := shared.ANSIRe.ReplaceAllString(nm.View().Content, "")
 	if !strings.Contains(got, "sub") || !strings.Contains(got, "●") {
 		t.Errorf("profiles tab missing table content:\n%s", got)
 	}
@@ -197,10 +198,10 @@ func TestProfileImportInput(t *testing.T) {
 	if nm.(Model).form.focus != 0 {
 		t.Fatalf("initial focus = %d, want 0 (URL)", nm.(Model).form.focus)
 	}
-	if got := ansiRe.ReplaceAllString(nm.View().Content, ""); !strings.Contains(got, "Import subscription") {
+	if got := shared.ANSIRe.ReplaceAllString(nm.View().Content, ""); !strings.Contains(got, "Import subscription") {
 		t.Errorf("View missing import popup:\n%s", got)
 	}
-	formView := ansiRe.ReplaceAllString(nm.(Model).importFormView(60, 10), "")
+	formView := shared.ANSIRe.ReplaceAllString(nm.(Model).importFormView(60, 10), "")
 	for _, border := range []string{"┌", "├", "└"} {
 		if !strings.Contains(formView, border) {
 			t.Errorf("import popup missing %q border:\n%s", border, formView)

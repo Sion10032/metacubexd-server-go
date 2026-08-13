@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 	"metacubexd-server-go/internal/supervisor"
 )
 
@@ -40,7 +41,7 @@ type Model struct {
 func New(client *ctl.Client) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = spinnerStyle
+	s.Style = shared.SpinnerStyle
 	return Model{
 		client:   client,
 		logs:     NewLogsModel(),
@@ -55,11 +56,11 @@ func New(client *ctl.Client) Model {
 // second, subscribe to the SSE log stream and load the profile list.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		fetchStatusCmd(m.client),
-		statusTick(),
-		subscribeCmd(m.client),
+		shared.FetchStatus(m.client),
+		shared.StatusTick(),
+		shared.Subscribe(m.client),
 		fetchProfilesCmd(m.client),
-		requestBackgroundColorCmd(),
+		shared.RequestBackgroundColor(),
 	)
 }
 
@@ -82,22 +83,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		if msg.Height > frameRows {
-			m.logs.SetSize(msg.Width-2, msg.Height-frameRows)
+		if msg.Height > shared.FrameRows {
+			m.logs.SetSize(msg.Width-2, msg.Height-shared.FrameRows)
 		}
 		return m, nil
 	case tea.BackgroundColorMsg:
-		setTheme(msg.IsDark())
-		setModalBackground(msg.Color)
-		m.spinner.Style = spinnerStyle
+		shared.SetTheme(msg.IsDark())
+		shared.SetModalBackground(msg.Color)
+		m.spinner.Style = shared.SpinnerStyle
 		return m, nil
 	case tea.QuitMsg:
 		m.quitting = true
 		m.closeLogStream()
 		return m, nil
-	case subscribedMsg, logMsg, stateMsg, logClosedMsg:
+	case shared.SubscribedMsg, shared.LogLineMsg, shared.KernelStateMsg, shared.LogClosedMsg:
 		return m.updateStream(msg)
-	case statusLoadedMsg, statusErrorMsg, spinner.TickMsg, tickMsg:
+	case shared.StatusLoadedMsg, shared.StatusErrorMsg, spinner.TickMsg, shared.TickMsg:
 		return m.updateStatus(msg)
 	case profilesLoadedMsg, profileOpMsg:
 		return m.updateProfilesMsg(msg)
@@ -171,12 +172,12 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 // View returns the rendered layout as a tea.View with mouse support enabled.
-// Narrow screens (under narrowWidth columns) get the bare log stream instead
+// Narrow screens (under shared.NarrowWidth columns) get the bare log stream instead
 // of the frame — no frame, no tabs. Modal overlays are stacked on top of the
 // frame based on the kernel model's edit states.
 func (m Model) View() tea.View {
 	var content string
-	if m.width > 0 && m.width < narrowWidth {
+	if m.width > 0 && m.width < shared.NarrowWidth {
 		m.logs.SetSize(m.width, m.height)
 		content = m.logs.View()
 	} else {

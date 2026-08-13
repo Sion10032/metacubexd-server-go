@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 
+	"metacubexd-server-go/internal/ctl/tui/shared"
 	"metacubexd-server-go/internal/profile"
 )
 
@@ -109,7 +110,7 @@ func (m Model) updateProfilesMsg(msg tea.Msg) (Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		return m, tea.Batch(fetchProfilesCmd(m.client), fetchStatusCmd(m.client))
+		return m, tea.Batch(fetchProfilesCmd(m.client), shared.FetchStatus(m.client))
 	}
 	return m, nil
 }

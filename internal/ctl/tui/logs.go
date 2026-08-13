@@ -7,6 +7,8 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
 // maxLogLines caps the retained log lines to bound memory; the viewport only
@@ -74,7 +76,7 @@ func (l *LogsModel) render() {
 		// and clobber the history while filtering.
 		var kept []string
 		for _, line := range visible {
-			if strings.Contains(stripANSI(line), l.filter) {
+			if strings.Contains(shared.StripANSI(line), l.filter) {
 				kept = append(kept, line)
 			}
 		}
@@ -84,11 +86,6 @@ func (l *LogsModel) render() {
 	if l.follow {
 		l.viewport.GotoBottom()
 	}
-}
-
-// stripANSI removes SGR escape sequences for plain-text matching.
-func stripANSI(s string) string {
-	return ansiRe.ReplaceAllString(s, "")
 }
 
 // updateFilter handles the filter input state: enter applies, esc cancels,

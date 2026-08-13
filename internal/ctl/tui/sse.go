@@ -1,106 +1,35 @@
 package tui
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
-	"metacubexd-server-go/internal/ctl"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
-
-// subscribeCmd opens the SSE log subscription and hands the stream to the
-// model via subscribedMsg.
-func subscribeCmd(c *ctl.Client) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
-		ch, err := c.SubscribeLogs(ctx)
-		if err != nil {
-			cancel()
-			return statusErrorMsg{err: err}
-		}
-		return subscribedMsg{ch: ch, cancel: cancel}
-	}
-}
-
-// forwardEventsCmd pumps one event from the stream into the message loop,
-// re-arming itself so the stream keeps flowing.
-func forwardEventsCmd(ch <-chan ctl.Event) tea.Cmd {
-	return func() tea.Msg {
-		ev, ok := <-ch
-		if !ok {
-			return logClosedMsg{}
-		}
-		if msg := parseLogEvent(ev); msg != nil {
-			return msg
-		}
-		return forwardEventsCmd(ch)()
-	}
-}
-
-// parseLogEvent decodes an SSE payload into a logMsg or stateMsg, or nil for
-// unknown event types.
-func parseLogEvent(ev ctl.Event) tea.Msg {
-	var header struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal([]byte(ev.Data), &header); err != nil {
-		return nil
-	}
-	switch header.Type {
-	case "log":
-		var l supervisor.KernelLogLine
-		if err := json.Unmarshal([]byte(ev.Data), &l); err != nil {
-			return nil
-		}
-		return logMsg{line: formatLogLine(l)}
-	case "state":
-		var st supervisor.KernelState
-		if err := json.Unmarshal([]byte(ev.Data), &st); err != nil {
-			return nil
-		}
-		return stateMsg{state: st}
-	}
-	return nil
-}
-
-// formatLogLine renders a kernel log line as "2006-01-02 15:04:05 LEVEL  line".
-func formatLogLine(l supervisor.KernelLogLine) string {
-	level := "INFO "
-	if l.Stream == "stderr" {
-		level = errorStyle.Render("ERROR")
-	}
-	ts := time.UnixMilli(l.TS).Format("2006-01-02 15:04:05")
-	return fmt.Sprintf("%s %s  %s", ts, level, l.Line)
-}
 
 // closeLogStream cancels the SSE subscription so its goroutine and HTTP
 // connection are released on exit.
 func (m *Model) closeLogStream() {
-	if m.logCancel != nil {
-		m.logCancel()
-		m.logCancel = nil
-	}
+	shared.CloseStream(m.logCancel)
+	m.logCancel = nil
 }
 
 // updateStream handles the SSE stream messages: subscription setup, log
 // lines, kernel state pushes and stream teardown.
 func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case subscribedMsg:
-		m.logCancel = msg.cancel
-		m.logCh = msg.ch
-		return m, forwardEventsCmd(msg.ch)
-	case logMsg:
-		m.logs.append(msg.line)
-		return m, forwardEventsCmd(m.logCh)
-	case stateMsg:
-		m.state = &msg.state
-		return m, forwardEventsCmd(m.logCh)
-	case logClosedMsg:
+	case shared.SubscribedMsg:
+		m.logCancel = msg.Cancel
+		m.logCh = msg.Ch
+		return m, shared.ForwardEvents(msg.Ch)
+	case shared.LogLineMsg:
+		m.logs.append(msg.Line)
+		return m, shared.ForwardEvents(m.logCh)
+	case shared.KernelStateMsg:
+		m.state = &msg.State
+		return m, shared.ForwardEvents(m.logCh)
+	case shared.LogClosedMsg:
 		if !m.quitting {
 			m.err = fmt.Errorf("log stream closed")
 		}
