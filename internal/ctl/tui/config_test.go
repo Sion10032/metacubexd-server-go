@@ -51,7 +51,7 @@ func TestConfigViewerOpen(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("enter on View Config returned no command")
 	}
-	if !nm.(Model).viewingConfig {
+	if !nm.(Model).kernel.viewingConfig {
 		t.Fatal("viewingConfig should be true")
 	}
 	msg := cmd()
@@ -86,7 +86,7 @@ func TestConfigViewerToggle(t *testing.T) {
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	mdl := nm.(Model)
-	mdl.viewingConfig = true
+	mdl.kernel.viewingConfig = true
 	nm = mdl
 	nm, _ = nm.Update(configLoadedMsg{mode: configActive, content: "active: true\n"})
 
@@ -111,14 +111,14 @@ func TestConfigViewerClose(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	mdl := nm.(Model)
-	mdl.viewingConfig = true
+	mdl.kernel.viewingConfig = true
 	nm = mdl
 
 	nm, cmd := nm.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd != nil {
 		t.Fatal("esc should not return a command")
 	}
-	if nm.(Model).viewingConfig {
+	if nm.(Model).kernel.viewingConfig {
 		t.Fatal("viewingConfig should be false after esc")
 	}
 }
@@ -139,11 +139,11 @@ func TestSectionEdit(t *testing.T) {
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	mdl := nm.(Model)
-	mdl.viewingConfig = true
+	mdl.kernel.viewingConfig = true
 	nm = mdl
 
 	nm, _ = nm.Update(keyPress("e"))
-	if !nm.(Model).editingSection {
+	if !nm.(Model).kernel.editingSection {
 		t.Fatal("editingSection should be true after e")
 	}
 
@@ -193,10 +193,10 @@ func TestNetworkFieldEdit(t *testing.T) {
 		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !nm.(Model).editing {
+	if !nm.(Model).kernel.editing {
 		t.Fatal("editing should be true after enter on mixed-port")
 	}
-	if got := nm.(Model).editInput.Value(); got != "7890" {
+	if got := nm.(Model).kernel.editInput.Value(); got != "7890" {
 		t.Errorf("editInput = %q, want 7890", got)
 	}
 
@@ -239,7 +239,7 @@ func TestTunFieldEdit(t *testing.T) {
 		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if got := nm.(Model).editInput.Value(); got != "true" {
+	if got := nm.(Model).kernel.editInput.Value(); got != "true" {
 		t.Errorf("editInput = %q, want true", got)
 	}
 
