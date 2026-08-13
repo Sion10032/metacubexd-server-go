@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -29,7 +30,7 @@ type Model struct {
 	profiles    ProfilesModel
 	profActive  string
 	importing   bool
-	importURL   string
+	form        importForm
 	confirmDel  bool
 	activeTab   int
 	kSelected   int
@@ -127,42 +128,75 @@ func profileOpCmd(c *ctl.Client, op func() error) tea.Cmd {
 	}
 }
 
-// updateImport handles the import-URL input state: enter imports, esc
-// cancels, backspace deletes; other printable keys (including pasted runs)
-// append.
-func (m Model) updateImport(key string) (Model, tea.Cmd) {
-	switch key {
-	case "enter":
-		url := m.importURL
-		m.importing = false
-		m.importURL = ""
-		if url == "" {
+// importForm bundles the two textinputs of the import popup.
+type importForm struct {
+	url   textinput.Model
+	name  textinput.Model
+	focus int // 0 = URL, 1 = Name
+}
+
+// newImportForm builds an import popup with the URL field focused.
+func newImportForm() importForm {
+	url := textinput.New()
+	url.Prompt = "URL:  "
+	url.Placeholder = "https://example.com/sub.yaml"
+	url.Width = 50
+	name := textinput.New()
+	name.Prompt = "Name: "
+	name.Placeholder = "(optional)"
+	name.Width = 50
+	return importForm{url: url, name: name}
+}
+
+// updateImport drives the import popup: tab switches the focused field, enter
+// imports the entered URL+name, esc cancels; other keys feed the focused
+// textinput.
+func (m Model) updateImport(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.importing = false
+			m.form.url.Reset()
+			m.form.name.Reset()
 			return m, nil
-		}
-		return m, importCmd(m.client, url)
-	case "esc":
-		m.importing = false
-		m.importURL = ""
-	case "backspace":
-		if r := []rune(m.importURL); len(r) > 0 {
-			m.importURL = string(r[:len(r)-1])
-		}
-	default:
-		// Skip navigation/control keys; accept anything else (URL chars,
-		// including a pasted run).
-		switch key {
-		case "tab", "shift+tab", "up", "down", "left", "right", "pgup", "pgdown", "home", "end":
+		case "tab":
+			m.form.focus = 1 - m.form.focus
+			if m.form.focus == 0 {
+				m.form.name.Blur()
+				return m, m.form.url.Focus()
+			}
+			m.form.url.Blur()
+			return m, m.form.name.Focus()
+		case "enter":
+			url := strings.TrimSpace(m.form.url.Value())
+			name := strings.TrimSpace(m.form.name.Value())
+			m.importing = false
+			m.form.url.Reset()
+			m.form.name.Reset()
+			if url == "" {
+				return m, nil
+			}
+			return m, importCmd(m.client, url, name)
 		default:
-			m.importURL += key
+			if m.form.focus == 0 {
+				var cmd tea.Cmd
+				m.form.url, cmd = m.form.url.Update(msg)
+				return m, cmd
+			}
+			var cmd tea.Cmd
+			m.form.name, cmd = m.form.name.Update(msg)
+			return m, cmd
 		}
 	}
 	return m, nil
 }
 
-// importCmd imports a subscription URL into a new profile.
-func importCmd(c *ctl.Client, url string) tea.Cmd {
+// importCmd imports a subscription URL under an optional name into a new
+// profile.
+func importCmd(c *ctl.Client, url, name string) tea.Cmd {
 	return func() tea.Msg {
-		if _, err := c.ProfileImport(url, ""); err != nil {
+		if _, err := c.ProfileImport(url, name); err != nil {
 			return profileOpMsg{err: err}
 		}
 		return profileOpMsg{}
@@ -263,7 +297,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.importing {
 			var cmd tea.Cmd
-			m, cmd = m.updateImport(key)
+			m, cmd = m.updateImport(msg)
 			return m, cmd
 		}
 		if m.confirmDel {
@@ -322,7 +356,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "i":
 			if m.activeTab == 1 {
 				m.importing = true
-				m.importURL = ""
+				m.form = newImportForm()
+				return m, m.form.url.Focus()
 			}
 		default:
 			// Config tab: up/down/enter drive kernel selection; other keys (and
@@ -558,7 +593,7 @@ func (m Model) View() string {
 	case m.filtering:
 		help = "filter: " + m.filterInput + "▌  (enter:apply  esc:cancel)"
 	case m.importing:
-		help = "import URL: " + m.importURL + "▌  (enter:import  esc:cancel)"
+		help = "import: tab:switch  enter:import  esc:cancel"
 	case m.confirmDel:
 		help = "⚠ 删除所选 profile? (y 确认 / 其他取消)"
 	default:
@@ -595,6 +630,28 @@ func (m Model) errText() string {
 	return m.err.Error()
 }
 
+// importFormView renders the import popup as a bordered modal: a bold header,
+// the two textinputs, then a separated key-hint footer, centered in the body
+// area.
+func (m Model) importFormView(width, height int) string {
+	const cw = 60 // modal content width
+	header := lipgloss.NewStyle().Bold(true).Width(cw).Align(lipgloss.Center).Render("Import subscription")
+	content := strings.Join([]string{
+		frameTop(cw, "", ""),
+		frameRow(header, cw),
+		frameSep(cw),
+		frameRow(m.form.url.View(), cw),
+		frameRow(m.form.name.View(), cw),
+		frameSep(cw),
+		frameRow("tab:switch  enter:import  esc:cancel", cw),
+		frameBottom(cw),
+	}, "\n")
+	return lipgloss.NewStyle().
+		Width(width).Height(height).
+		Align(lipgloss.Center, lipgloss.Center).
+		Render(content)
+}
+
 // body renders the active tab's content at the given size, wrapping every
 // line with the frame borders. Logs shows the viewport; the other tabs are
 // centered placeholders until their phases land.
@@ -604,8 +661,12 @@ func (m Model) body(width, height int) string {
 	case 0:
 		content = m.logs.View()
 	case 1:
-		m.profiles.SetSize(width, height)
-		content = m.profiles.View()
+		if m.importing {
+			content = m.importFormView(width, height)
+		} else {
+			m.profiles.SetSize(width, height)
+			content = m.profiles.View()
+		}
 	case 2:
 		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(renderKernelTab(m.state, m.kSelected, m.err, m.kConfirming))
 	default:

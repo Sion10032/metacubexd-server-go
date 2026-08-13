@@ -173,7 +173,8 @@ func TestProfileDeleteConfirm(t *testing.T) {
 	}
 }
 
-// TestProfileImportInput verifies i opens URL input and enter imports it.
+// TestProfileImportInput verifies i opens the URL+name popup, tab switches to
+// the name field, and enter imports both.
 func TestProfileImportInput(t *testing.T) {
 	var gotURI, gotBody string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -181,22 +182,47 @@ func TestProfileImportInput(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"id":"new","name":"","type":"remote","updatedAt":1}`)
+		fmt.Fprint(w, `{"id":"new","name":"my-sub","type":"remote","updatedAt":1}`)
 	}))
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")}) // Profiles tab
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")}) // Subscriptions tab
 	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	if !nm.(Model).importing {
 		t.Fatal("importing should be true after i")
+	}
+	if nm.(Model).form.focus != 0 {
+		t.Fatalf("initial focus = %d, want 0 (URL)", nm.(Model).form.focus)
+	}
+	if got := ansiRe.ReplaceAllString(nm.View(), ""); !strings.Contains(got, "Import subscription") {
+		t.Errorf("View missing import popup:\n%s", got)
+	}
+	formView := ansiRe.ReplaceAllString(nm.(Model).importFormView(60, 10), "")
+	for _, border := range []string{"┌", "├", "└"} {
+		if !strings.Contains(formView, border) {
+			t.Errorf("import popup missing %q border:\n%s", border, formView)
+		}
 	}
 
 	for _, r := range "https://example.com/sub" {
 		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
 	}
-	if got := nm.(Model).importURL; got != "https://example.com/sub" {
-		t.Errorf("importURL = %q, want the typed URL", got)
+	if got := nm.(Model).form.url.Value(); got != "https://example.com/sub" {
+		t.Errorf("url = %q, want the typed URL", got)
+	}
+
+	// tab moves focus to the name field.
+	nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if nm.(Model).form.focus != 1 {
+		t.Fatalf("focus after tab = %d, want 1 (Name)", nm.(Model).form.focus)
+	}
+	for _, r := range "my-sub" {
+		nm, _ = nm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+	}
+	if got := nm.(Model).form.name.Value(); got != "my-sub" {
+		t.Errorf("name = %q, want the typed name", got)
 	}
 
 	nm, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -209,5 +235,8 @@ func TestProfileImportInput(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, "https://example.com/sub") {
 		t.Errorf("body = %q, want the URL", gotBody)
+	}
+	if !strings.Contains(gotBody, "\"name\":\"my-sub\"") {
+		t.Errorf("body = %q, want the name", gotBody)
 	}
 }
