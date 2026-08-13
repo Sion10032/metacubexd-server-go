@@ -15,7 +15,7 @@ func (m Model) body(width, height int) string {
 	var content string
 	switch m.activeTab {
 	case 0:
-		content = m.logs.View()
+		content = m.tabs[0].View()
 	case 1:
 		if m.importing {
 			content = m.importFormView(width, height)
