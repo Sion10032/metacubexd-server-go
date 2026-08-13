@@ -100,26 +100,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateKey routes key presses. Modal states (filter, import, kernel edit,
-// delete confirm) take priority; the remaining keys drive the active tab.
+// updateKey routes key presses: the active page consumes first, then global
+// keys (quit/tab-switch) and finally scroll fallback to the log viewport.
 func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
-	key := msg.(tea.KeyPressMsg).String()
-	logsTab := m.logsPage()
-	switch {
-	case logsTab.Filtering():
-		logsTab.UpdateFilterKey(key)
-		return m, nil
-	case m.activeTab == 1 && (m.profilesPage().Importing() || m.profilesPage().ConfirmingDel()):
-		return m.updateTabKey(msg)
-	}
-	// The kernel page's popup (network-field editor, section editor, config
-	// viewer) consumes all keys while open. The modal state is global: it is
-	// only ever opened on the Config tab and swallows the tab-switch keys, so
-	// in practice it is never open on another tab.
-	if modal := m.tabs[2].Overlay(); modal != nil {
-		_, cmd := modal.Update(msg)
+	tab, cmd, handled := m.tabs[m.activeTab].Update(msg)
+	m.tabs[m.activeTab] = tab
+	if handled {
 		return m, cmd
 	}
+	key := msg.(tea.KeyPressMsg).String()
 	switch key {
 	case "q", "ctrl+c":
 		m.quitting = true
@@ -130,47 +119,15 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 		if m.activeTab == 2 && !m.kernelPage().NetworkLoaded() {
 			return m, kernel.FetchNetworkSettings(m.client)
 		}
-	case "/":
-		if m.activeTab == 0 {
-			logsTab.StartFilter()
-		}
-	case "f":
-		if m.activeTab == 0 {
-			logsTab.ToggleFollow()
-		}
-	case "a", "u", "d", "i":
-		if m.activeTab == 1 {
-			return m.updateTabKey(msg)
-		}
 	default:
-		// Config tab: up/down/enter drive menu selection; the config viewer
-		// modal handles its own scrolling when open.
-		if m.activeTab == 2 {
-			return m.updateTabKey(msg)
+		// Scroll fallback: on any tab except Config, unhandled scroll keys
+		// reach the log viewport. The whitelist keeps "/" and "f" from
+		// leaking into the logs page on other tabs.
+		if m.activeTab != 2 && shared.IsScrollKey(key) {
+			m.tabs[0].Update(msg)
 		}
-		// Profiles tab: selection keys drive the table; scroll keys fall
-		// through to the log viewport below.
-		if m.activeTab == 1 {
-			tab, _ := m.tabs[1].Update(msg)
-			m.tabs[1] = tab
-			if key == "up" || key == "down" || key == "enter" {
-				return m, nil // consumed by the table
-			}
-		}
-		// Scroll keys (PgUp/PgDn/arrows) reach the log viewport on any tab.
-		m.tabs[0].Update(msg)
 	}
 	return m, nil
-}
-
-// logsPage returns the Logs page stored in tabs[0].
-func (m Model) logsPage() *logs.Model {
-	return m.tabs[0].(*logs.Model)
-}
-
-// profilesPage returns the Profiles page stored in tabs[1].
-func (m Model) profilesPage() *profiles.Model {
-	return m.tabs[1].(*profiles.Model)
 }
 
 // kernelPage returns the Kernel page stored in tabs[2].
@@ -178,12 +135,9 @@ func (m Model) kernelPage() *kernel.Model {
 	return m.tabs[2].(*kernel.Model)
 }
 
-// updateTabKey routes a key press to the active tab page, storing the
-// returned page back into tabs and forwarding its command.
-func (m Model) updateTabKey(msg tea.Msg) (Model, tea.Cmd) {
-	tab, cmd := m.tabs[m.activeTab].Update(msg)
-	m.tabs[m.activeTab] = tab
-	return m, cmd
+// profilesPage returns the Profiles page stored in tabs[1].
+func (m Model) profilesPage() *profiles.Model {
+	return m.tabs[1].(*profiles.Model)
 }
 
 // View returns the rendered layout as a tea.View with mouse support enabled.

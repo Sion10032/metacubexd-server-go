@@ -87,10 +87,14 @@ func TestConfigViewerToggle(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	mdl := nm.(Model)
-	mdl.tabs[2].(*kernel.Model).SetViewingConfig(true)
-	nm = mdl
+	nm, _ = nm.Update(keyPress("3")) // Config tab
 	nm, _ = nm.Update(kernel.ConfigLoadedMsg{Mode: kernel.ConfigActive, Content: "active: true\n"})
+
+	// Move selection down to the View YAML entry and open the viewer.
+	for i := 0; i < kernel.ConfigMenuLen()-1; i++ {
+		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	nm, cmd := nm.Update(keyPress("c"))
 	if cmd == nil {
@@ -112,9 +116,13 @@ func TestConfigViewerToggle(t *testing.T) {
 func TestConfigViewerClose(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	mdl := nm.(Model)
-	mdl.tabs[2].(*kernel.Model).SetViewingConfig(true)
-	nm = mdl
+	nm, _ = nm.Update(keyPress("3")) // Config tab
+
+	// Move selection down to the View YAML entry and open the viewer.
+	for i := 0; i < kernel.ConfigMenuLen()-1; i++ {
+		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	nm, cmd := nm.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd != nil {
@@ -140,9 +148,13 @@ func TestSectionEdit(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	mdl := nm.(Model)
-	mdl.tabs[2].(*kernel.Model).SetViewingConfig(true)
-	nm = mdl
+	nm, _ = nm.Update(keyPress("3")) // Config tab
+
+	// Move selection down to the View YAML entry and open the viewer.
+	for i := 0; i < kernel.ConfigMenuLen()-1; i++ {
+		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	nm, _ = nm.Update(keyPress("e"))
 	if !nm.(Model).tabs[2].(*kernel.Model).EditingSection() {

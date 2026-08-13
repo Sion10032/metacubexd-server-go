@@ -101,7 +101,7 @@ func TestProfileImportInput(t *testing.T) {
 		t.Errorf("name = %q, want the typed name", got)
 	}
 
-	_, cmd := p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	_, cmd, _ := p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("enter returned no command")
 	}

@@ -48,7 +48,7 @@ func (md *sectionModal) View(w, h int) string {
 
 // startEditField opens the single-value editor for a network field, prefilled
 // with its current value.
-func (m *Model) startEditField(i int) (shared.Tab, tea.Cmd) {
+func (m *Model) startEditField(i int) (shared.Tab, tea.Cmd, bool) {
 	m.editing = true
 	m.editField = i
 	in := textinput.New()
@@ -56,7 +56,7 @@ func (m *Model) startEditField(i int) (shared.Tab, tea.Cmd) {
 	in.SetWidth(40)
 	in.SetValue(m.network.valueOf(networkFields[i]))
 	m.editInput = in
-	return m, in.Focus()
+	return m, in.Focus(), true
 }
 
 // updateEdit drives the network field editor: enter saves via PutSection, esc
