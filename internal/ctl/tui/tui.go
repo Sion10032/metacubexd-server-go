@@ -3,11 +3,9 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/spinner"
@@ -17,7 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"metacubexd-server-go/internal/ctl"
-	"metacubexd-server-go/internal/profile"
 	"metacubexd-server-go/internal/supervisor"
 )
 
@@ -63,69 +60,6 @@ func New(client *ctl.Client) Model {
 	return Model{client: client, logs: NewLogsModel(), profiles: NewProfilesModel(), config: NewConfigModel(), spinner: s}
 }
 
-// statusLoadedMsg carries a fresh kernel state from the control API.
-type statusLoadedMsg struct {
-	state supervisor.KernelState
-}
-
-// statusErrorMsg carries a control API failure (connection, auth, ...).
-type statusErrorMsg struct {
-	err error
-}
-
-// tickMsg fires once per second to refresh the kernel status.
-type tickMsg struct{}
-
-// subscribedMsg carries the live SSE log stream and its cancellation func.
-type subscribedMsg struct {
-	ch     <-chan ctl.Event
-	cancel context.CancelFunc
-}
-
-// logMsg carries one formatted kernel log line.
-type logMsg struct {
-	line string
-}
-
-// stateMsg carries a kernel state pushed over SSE.
-type stateMsg struct {
-	state supervisor.KernelState
-}
-
-// logClosedMsg fires when the SSE log stream ends.
-type logClosedMsg struct{}
-
-// profilesLoadedMsg carries the fetched profile list.
-type profilesLoadedMsg struct {
-	list []profile.Meta
-	err  error
-}
-
-// profileOpMsg carries the result of a profile operation; a nil err means the
-// lists and kernel status should be refreshed.
-type profileOpMsg struct {
-	err error
-}
-
-// configLoadedMsg carries a fetched config body (active or runtime).
-type configLoadedMsg struct {
-	mode    int
-	content string
-	err     error
-}
-
-// sectionEditMsg carries the result of a config section edit.
-type sectionEditMsg struct {
-	err error
-}
-
-// networkSettingsMsg carries the fetched network settings of the active
-// config.
-type networkSettingsMsg struct {
-	settings networkSettings
-	err      error
-}
-
 // Init returns the initial commands: fetch kernel status, poll it every
 // second, subscribe to the SSE log stream and load the profile list.
 func (m Model) Init() tea.Cmd {
@@ -136,38 +70,6 @@ func (m Model) Init() tea.Cmd {
 		fetchProfilesCmd(m.client),
 		requestBackgroundColorCmd(),
 	)
-}
-
-// requestBackgroundColorCmd asks the terminal for its background color so the
-// theme can adapt to dark/light.
-func requestBackgroundColorCmd() tea.Cmd {
-	return func() tea.Msg {
-		return tea.RequestBackgroundColor()
-	}
-}
-
-// fetchProfilesCmd loads the profile list once.
-func fetchProfilesCmd(c *ctl.Client) tea.Cmd {
-	return func() tea.Msg {
-		list, err := c.ProfilesList()
-		return profilesLoadedMsg{list: list, err: err}
-	}
-}
-
-// fetchConfigCmd loads the active (mode 0) or runtime (mode 1) config once.
-func fetchConfigCmd(c *ctl.Client, mode int) tea.Cmd {
-	return func() tea.Msg {
-		var (
-			content string
-			err     error
-		)
-		if mode == configRuntime {
-			content, err = c.GetRuntimeConfig()
-		} else {
-			content, err = c.GetConfig()
-		}
-		return configLoadedMsg{mode: mode, content: content, err: err}
-	}
 }
 
 // networkSettings holds the editable network fields of the active config.
@@ -272,17 +174,6 @@ func parseNetworkSettings(content string) networkSettings {
 	return ns
 }
 
-// profileOpCmd runs a profile operation; on success the caller refreshes the
-// lists via profileOpMsg.
-func profileOpCmd(c *ctl.Client, op func() error) tea.Cmd {
-	return func() tea.Msg {
-		if err := op(); err != nil {
-			return profileOpMsg{err: err}
-		}
-		return profileOpMsg{}
-	}
-}
-
 // importForm bundles the two textinputs of the import popup.
 type importForm struct {
 	url   textinput.Model
@@ -345,100 +236,6 @@ func (m Model) updateImport(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	}
 	return m, nil
-}
-
-// importCmd imports a subscription URL under an optional name into a new
-// profile.
-func importCmd(c *ctl.Client, url, name string) tea.Cmd {
-	return func() tea.Msg {
-		if _, err := c.ProfileImport(url, name); err != nil {
-			return profileOpMsg{err: err}
-		}
-		return profileOpMsg{}
-	}
-}
-
-// subscribeCmd opens the SSE log subscription and hands the stream to the
-// model via subscribedMsg.
-func subscribeCmd(c *ctl.Client) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
-		ch, err := c.SubscribeLogs(ctx)
-		if err != nil {
-			cancel()
-			return statusErrorMsg{err: err}
-		}
-		return subscribedMsg{ch: ch, cancel: cancel}
-	}
-}
-
-// forwardEventsCmd pumps one event from the stream into the message loop,
-// re-arming itself so the stream keeps flowing.
-func forwardEventsCmd(ch <-chan ctl.Event) tea.Cmd {
-	return func() tea.Msg {
-		ev, ok := <-ch
-		if !ok {
-			return logClosedMsg{}
-		}
-		if msg := parseLogEvent(ev); msg != nil {
-			return msg
-		}
-		return forwardEventsCmd(ch)()
-	}
-}
-
-// parseLogEvent decodes an SSE payload into a logMsg or stateMsg, or nil for
-// unknown event types.
-func parseLogEvent(ev ctl.Event) tea.Msg {
-	var header struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal([]byte(ev.Data), &header); err != nil {
-		return nil
-	}
-	switch header.Type {
-	case "log":
-		var l supervisor.KernelLogLine
-		if err := json.Unmarshal([]byte(ev.Data), &l); err != nil {
-			return nil
-		}
-		return logMsg{line: formatLogLine(l)}
-	case "state":
-		var st supervisor.KernelState
-		if err := json.Unmarshal([]byte(ev.Data), &st); err != nil {
-			return nil
-		}
-		return stateMsg{state: st}
-	}
-	return nil
-}
-
-// formatLogLine renders a kernel log line as "2006-01-02 15:04:05 LEVEL  line".
-func formatLogLine(l supervisor.KernelLogLine) string {
-	level := "INFO "
-	if l.Stream == "stderr" {
-		level = errorStyle.Render("ERROR")
-	}
-	ts := time.UnixMilli(l.TS).Format("2006-01-02 15:04:05")
-	return fmt.Sprintf("%s %s  %s", ts, level, l.Line)
-}
-
-// fetchStatusCmd fetches the kernel status once.
-func fetchStatusCmd(c *ctl.Client) tea.Cmd {
-	return func() tea.Msg {
-		st, err := c.KernelStatus()
-		if err != nil {
-			return statusErrorMsg{err: err}
-		}
-		return statusLoadedMsg{state: st}
-	}
-}
-
-// statusTick schedules the next status refresh one second from now.
-func statusTick() tea.Cmd {
-	return tea.Tick(time.Second, func(time.Time) tea.Msg {
-		return tickMsg{}
-	})
 }
 
 // Update handles messages and key presses.
