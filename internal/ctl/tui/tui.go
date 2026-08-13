@@ -10,6 +10,7 @@ import (
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui/components"
 	"metacubexd-server-go/internal/ctl/tui/pages/logs"
+	"metacubexd-server-go/internal/ctl/tui/pages/profiles"
 	"metacubexd-server-go/internal/ctl/tui/shared"
 	"metacubexd-server-go/internal/supervisor"
 )
@@ -17,24 +18,19 @@ import (
 // Model is the top-level Bubble Tea model. It owns the kernel state, the
 // active tab index and the tab pages; feature state lives inside each page.
 type Model struct {
-	client     *ctl.Client
-	state      *supervisor.KernelState
-	err        error
-	tabs       []shared.Tab
-	profiles   ProfilesModel
-	config     ConfigModel
-	kernel     KernelModel
-	profActive string
-	importing  bool
-	form       components.Form
-	confirmDel bool
-	activeTab  int
-	spinner    spinner.Model
-	width      int
-	height     int
-	logCh      <-chan ctl.Event
-	logCancel  context.CancelFunc
-	quitting   bool
+	client    *ctl.Client
+	state     *supervisor.KernelState
+	err       error
+	tabs      []shared.Tab
+	config    ConfigModel
+	kernel    KernelModel
+	activeTab int
+	spinner   spinner.Model
+	width     int
+	height    int
+	logCh     <-chan ctl.Event
+	logCancel context.CancelFunc
+	quitting  bool
 }
 
 // New returns a Model for the given control API client.
@@ -43,12 +39,11 @@ func New(client *ctl.Client) Model {
 	s.Spinner = spinner.Dot
 	s.Style = shared.SpinnerStyle
 	return Model{
-		client:   client,
-		tabs:     []shared.Tab{logs.New(client)},
-		profiles: NewProfilesModel(),
-		config:   NewConfigModel(),
-		kernel:   NewKernelModel(),
-		spinner:  s,
+		client:  client,
+		tabs:    []shared.Tab{logs.New(client), profiles.New(client)},
+		config:  NewConfigModel(),
+		kernel:  NewKernelModel(),
+		spinner: s,
 	}
 }
 
@@ -59,7 +54,7 @@ func (m Model) Init() tea.Cmd {
 		shared.FetchStatus(m.client),
 		shared.StatusTick(),
 		shared.Subscribe(m.client),
-		fetchProfilesCmd(m.client),
+		profiles.FetchProfiles(m.client),
 		shared.RequestBackgroundColor(),
 	)
 }
@@ -100,7 +95,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateStream(msg)
 	case shared.StatusLoadedMsg, shared.StatusErrorMsg, spinner.TickMsg, shared.TickMsg:
 		return m.updateStatus(msg)
-	case profilesLoadedMsg, profileOpMsg:
+	case profiles.ProfilesLoadedMsg, profiles.ProfileOpMsg:
 		return m.updateProfilesMsg(msg)
 	case configLoadedMsg, networkSettingsMsg, sectionEditMsg:
 		return m.updateConfigMsg(msg)
@@ -117,16 +112,16 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 	case logsTab.Filtering():
 		logsTab.UpdateFilterKey(key)
 		return m, nil
-	case m.importing:
-		return m.updateImport(msg)
+	case m.activeTab == 1 && m.profilesPage().Importing():
+		return m.updateTabKey(msg)
 	case m.kernel.Editing():
 		return m.kernel.updateEdit(msg, m)
 	case m.kernel.EditingSection():
 		return m.kernel.updateSectionForm(msg, m)
 	case m.kernel.ViewingConfig():
 		return m.kernel.updateConfig(msg, m)
-	case m.confirmDel:
-		return m.updateConfirmDel(key)
+	case m.activeTab == 1 && m.profilesPage().ConfirmingDel():
+		return m.updateTabKey(msg)
 	}
 	switch key {
 	case "q", "ctrl+c":
@@ -148,7 +143,7 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case "a", "u", "d", "i":
 		if m.activeTab == 1 {
-			return m.updateProfilesKeys(key, msg)
+			return m.updateTabKey(msg)
 		}
 	default:
 		// Config tab: up/down/enter drive menu selection; the config viewer
@@ -159,7 +154,8 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 		// Profiles tab: selection keys drive the table; scroll keys fall
 		// through to the log viewport below.
 		if m.activeTab == 1 {
-			m.profiles.Update(msg)
+			tab, _ := m.tabs[1].Update(msg)
+			m.tabs[1] = tab
 			if key == "up" || key == "down" || key == "enter" {
 				return m, nil // consumed by the table
 			}
@@ -173,6 +169,19 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 // logsPage returns the Logs page stored in tabs[0].
 func (m Model) logsPage() *logs.Model {
 	return m.tabs[0].(*logs.Model)
+}
+
+// profilesPage returns the Profiles page stored in tabs[1].
+func (m Model) profilesPage() *profiles.Model {
+	return m.tabs[1].(*profiles.Model)
+}
+
+// updateTabKey routes a key press to the active tab page, storing the
+// returned page back into tabs and forwarding its command.
+func (m Model) updateTabKey(msg tea.Msg) (Model, tea.Cmd) {
+	tab, cmd := m.tabs[m.activeTab].Update(msg)
+	m.tabs[m.activeTab] = tab
+	return m, cmd
 }
 
 // View returns the rendered layout as a tea.View with mouse support enabled.
@@ -199,4 +208,29 @@ func (m Model) View() tea.View {
 	v := tea.NewView(content)
 	v.MouseMode = tea.MouseModeCellMotion
 	return v
+}
+
+// updateProfilesMsg routes profile load results and operation outcomes.
+// Errors surface on the root status bar; successful results are forwarded to
+// the Profiles page, which refreshes its table and re-issues the refetch.
+func (m Model) updateProfilesMsg(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case profiles.ProfilesLoadedMsg:
+		if msg.Err != nil {
+			m.err = msg.Err
+			return m, nil
+		}
+		tab, cmd := m.tabs[1].Update(msg)
+		m.tabs[1] = tab
+		return m, cmd
+	case profiles.ProfileOpMsg:
+		if msg.Err != nil {
+			m.err = msg.Err
+			return m, nil
+		}
+		tab, cmd := m.tabs[1].Update(msg)
+		m.tabs[1] = tab
+		return m, cmd
+	}
+	return m, nil
 }
