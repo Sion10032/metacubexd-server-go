@@ -195,8 +195,8 @@ func TestProfileImportInput(t *testing.T) {
 	if !nm.(Model).importing {
 		t.Fatal("importing should be true after i")
 	}
-	if nm.(Model).form.focus != 0 {
-		t.Fatalf("initial focus = %d, want 0 (URL)", nm.(Model).form.focus)
+	if nm.(Model).form.Focus != 0 {
+		t.Fatalf("initial focus = %d, want 0 (URL)", nm.(Model).form.Focus)
 	}
 	if got := shared.ANSIRe.ReplaceAllString(nm.View().Content, ""); !strings.Contains(got, "Import subscription") {
 		t.Errorf("View missing import popup:\n%s", got)
@@ -211,19 +211,19 @@ func TestProfileImportInput(t *testing.T) {
 	for _, r := range "https://example.com/sub" {
 		nm, _ = nm.Update(keyPress(string(r)))
 	}
-	if got := nm.(Model).form.url.Value(); got != "https://example.com/sub" {
+	if got := nm.(Model).form.Fields[0].Value(); got != "https://example.com/sub" {
 		t.Errorf("url = %q, want the typed URL", got)
 	}
 
 	// tab moves focus to the name field.
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	if nm.(Model).form.focus != 1 {
-		t.Fatalf("focus after tab = %d, want 1 (Name)", nm.(Model).form.focus)
+	if nm.(Model).form.Focus != 1 {
+		t.Fatalf("focus after tab = %d, want 1 (Name)", nm.(Model).form.Focus)
 	}
 	for _, r := range "my-sub" {
 		nm, _ = nm.Update(keyPress(string(r)))
 	}
-	if got := nm.(Model).form.name.Value(); got != "my-sub" {
+	if got := nm.(Model).form.Fields[1].Value(); got != "my-sub" {
 		t.Errorf("name = %q, want the typed name", got)
 	}
 

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/components"
 	"metacubexd-server-go/internal/ctl/tui/shared"
 	"metacubexd-server-go/internal/supervisor"
 )
@@ -24,7 +25,7 @@ type Model struct {
 	kernel      KernelModel
 	profActive  string
 	importing   bool
-	form        importForm
+	form        components.Form
 	confirmDel  bool
 	activeTab   int
 	spinner     spinner.Model
@@ -184,12 +185,12 @@ func (m Model) View() tea.View {
 		content = m.frameView()
 	}
 	if m.kernel.Editing() {
-		content = overlayModal(content, m.editInputView(), m.width, m.height)
+		content = components.OverlayModal(content, m.editInputView(), m.width, m.height)
 	}
 	if m.kernel.ViewingConfig() {
-		content = overlayModal(content, m.configModal(m.width, m.height), m.width, m.height)
+		content = components.OverlayModal(content, m.configModal(m.width, m.height), m.width, m.height)
 		if m.kernel.EditingSection() {
-			content = overlayModal(content, m.sectionFormView(), m.width, m.height)
+			content = components.OverlayModal(content, m.sectionFormView(), m.width, m.height)
 		}
 	}
 	v := tea.NewView(content)

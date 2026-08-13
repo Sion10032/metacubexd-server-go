@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/components"
 	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
@@ -76,7 +77,7 @@ func (k KernelModel) updateConfig(msg tea.Msg, m Model) (Model, tea.Cmd) {
 		case "e":
 			m.kernel.editingSection = true
 			m.kernel.sectionForm = newSectionForm()
-			return m, m.kernel.sectionForm.key.Focus()
+			return m, m.kernel.sectionForm.Fields[0].Focus()
 		case "c":
 			m.config.ToggleMode()
 			m.config.ResetScroll()
@@ -88,15 +89,8 @@ func (k KernelModel) updateConfig(msg tea.Msg, m Model) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// sectionForm bundles the two textinputs of the section editor popup.
-type sectionForm struct {
-	key   textinput.Model
-	value textinput.Model
-	focus int // 0 = key, 1 = value
-}
-
 // newSectionForm builds a section editor popup with the key field focused.
-func newSectionForm() sectionForm {
+func newSectionForm() components.Form {
 	key := textinput.New()
 	key.Prompt = "Key:   "
 	key.Placeholder = "mixed-port"
@@ -105,7 +99,7 @@ func newSectionForm() sectionForm {
 	value.Prompt = "Value: "
 	value.Placeholder = "7890"
 	value.SetWidth(50)
-	return sectionForm{key: key, value: value}
+	return components.NewForm(key, value)
 }
 
 // parseSectionValue parses the entered value as YAML so a plain scalar maps to
@@ -128,30 +122,17 @@ func (k KernelModel) updateSectionForm(msg tea.Msg, m Model) (Model, tea.Cmd) {
 		case "esc":
 			m.kernel.editingSection = false
 			return m, nil
-		case "tab":
-			m.kernel.sectionForm.focus = 1 - m.kernel.sectionForm.focus
-			if m.kernel.sectionForm.focus == 0 {
-				m.kernel.sectionForm.value.Blur()
-				return m, m.kernel.sectionForm.key.Focus()
-			}
-			m.kernel.sectionForm.key.Blur()
-			return m, m.kernel.sectionForm.value.Focus()
 		case "enter":
-			key := strings.TrimSpace(m.kernel.sectionForm.key.Value())
-			value := strings.TrimSpace(m.kernel.sectionForm.value.Value())
+			key := strings.TrimSpace(m.kernel.sectionForm.Fields[0].Value())
+			value := strings.TrimSpace(m.kernel.sectionForm.Fields[1].Value())
 			m.kernel.editingSection = false
 			if key == "" {
 				return m, nil
 			}
 			return m, sectionEditCmd(m.client, key, value)
 		default:
-			if m.kernel.sectionForm.focus == 0 {
-				var cmd tea.Cmd
-				m.kernel.sectionForm.key, cmd = m.kernel.sectionForm.key.Update(msg)
-				return m, cmd
-			}
 			var cmd tea.Cmd
-			m.kernel.sectionForm.value, cmd = m.kernel.sectionForm.value.Update(msg)
+			m.kernel.sectionForm, cmd = m.kernel.sectionForm.Update(msg)
 			return m, cmd
 		}
 	}
