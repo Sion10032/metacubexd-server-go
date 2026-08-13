@@ -4,25 +4,8 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 
-	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui/shared"
 )
-
-// fetchConfigCmd loads the active (mode 0) or runtime (mode 1) config once.
-func fetchConfigCmd(c *ctl.Client, mode int) tea.Cmd {
-	return func() tea.Msg {
-		var (
-			content string
-			err     error
-		)
-		if mode == configRuntime {
-			content, err = c.GetRuntimeConfig()
-		} else {
-			content, err = c.GetConfig()
-		}
-		return configLoadedMsg{mode: mode, content: content, err: err}
-	}
-}
 
 // updateStatus handles the kernel status messages: fresh states, errors and
 // the periodic tick; the spinner keeps animating while an operation runs.
@@ -30,16 +13,14 @@ func (m Model) updateStatus(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case shared.StatusLoadedMsg:
 		m.state = &msg.State
-		m.kernel.operating = false
-		m.kernel.kConfirming = false
+		m.kernelPage().ResetOperation()
 		return m, nil
 	case shared.StatusErrorMsg:
 		m.err = msg.Err
-		m.kernel.operating = false
-		m.kernel.kConfirming = false
+		m.kernelPage().ResetOperation()
 		return m, nil
 	case spinner.TickMsg:
-		if m.kernel.operating {
+		if m.tabs[2].Busy() {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd

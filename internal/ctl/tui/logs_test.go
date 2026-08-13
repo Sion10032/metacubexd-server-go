@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/pages/kernel"
 	"metacubexd-server-go/internal/ctl/tui/pages/logs"
 	"metacubexd-server-go/internal/ctl/tui/shared"
 )
@@ -170,14 +171,14 @@ func TestScrollOnEveryTab(t *testing.T) {
 	t.Run("config viewer", func(t *testing.T) {
 		m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 		nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		nm, _ = nm.Update(configLoadedMsg{mode: configActive, content: strings.Repeat("line\n", 50)})
+		nm, _ = nm.Update(kernel.ConfigLoadedMsg{Mode: kernel.ConfigActive, Content: strings.Repeat("line\n", 50)})
 		mdl := nm.(Model)
-		mdl.kernel.viewingConfig = true
+		mdl.tabs[2].(*kernel.Model).SetViewingConfig(true)
 		nm = mdl
 
 		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 		mdl = nm.(Model)
-		if YOffset := mdl.config.viewport.YOffset(); YOffset == 0 {
+		if YOffset := mdl.tabs[2].(*kernel.Model).ConfigYOffset(); YOffset == 0 {
 			t.Errorf("PgDn in config viewer did not scroll the config viewport (YOffset=0)")
 		}
 	})

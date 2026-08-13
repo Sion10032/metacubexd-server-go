@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/pages/kernel"
 	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
@@ -33,8 +34,8 @@ func runBatch(t *testing.T, cmd tea.Cmd) []tea.Msg {
 // TestKernelTabRender verifies the Config tab lists every operation, the
 // network fields and the raw YAML viewer, with the selected entry highlighted.
 func TestKernelTabRender(t *testing.T) {
-	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	got := m.renderKernelTab()
+	p := kernel.New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	got := p.View()
 	plain := shared.ANSIRe.ReplaceAllString(got, "")
 	for _, want := range []string{
 		"[kernel]", "Start", "Stop", "Restart",
@@ -57,13 +58,13 @@ func TestKernelTabSelect(t *testing.T) {
 
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if got := nm.(Model).kernel.kSelected; got != 2 {
+	if got := nm.(Model).tabs[2].(*kernel.Model).SelectedOp(); got != 2 {
 		t.Errorf("kSelected after 2x down = %d, want 2", got)
 	}
 
 	// up wraps to the last entry.
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-	if got := nm.(Model).kernel.kSelected; got != 1 {
+	if got := nm.(Model).tabs[2].(*kernel.Model).SelectedOp(); got != 1 {
 		t.Errorf("kSelected after up = %d, want 1", got)
 	}
 }
@@ -86,7 +87,7 @@ func TestKernelTabExecute(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("enter returned no command")
 	}
-	if !nm.(Model).kernel.operating {
+	if !nm.(Model).tabs[2].(*kernel.Model).Operating() {
 		t.Error("operating should be true while the operation runs")
 	}
 	runBatch(t, cmd) // spinner tick + kernel op
@@ -118,7 +119,7 @@ func _TestRecoverConfirm(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("confirm state should not issue a command")
 	}
-	if !nm.(Model).kernel.kConfirming {
+	if !nm.(Model).tabs[2].(*kernel.Model).Confirming() {
 		t.Fatal("kConfirming should be true")
 	}
 	if got := nm.View().Content; !strings.Contains(got, "确认执行") {
@@ -148,7 +149,7 @@ func _TestRecoverConfirm(t *testing.T) {
 	if gotURI != "" {
 		t.Errorf("unexpected request after cancel: %q", gotURI)
 	}
-	if nm.(Model).kernel.kConfirming {
+	if nm.(Model).tabs[2].(*kernel.Model).Confirming() {
 		t.Error("kConfirming should be false after cancel")
 	}
 }

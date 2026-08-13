@@ -9,6 +9,7 @@ import (
 
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui/components"
+	"metacubexd-server-go/internal/ctl/tui/pages/kernel"
 	"metacubexd-server-go/internal/ctl/tui/pages/logs"
 	"metacubexd-server-go/internal/ctl/tui/pages/profiles"
 	"metacubexd-server-go/internal/ctl/tui/shared"
@@ -22,8 +23,6 @@ type Model struct {
 	state     *supervisor.KernelState
 	err       error
 	tabs      []shared.Tab
-	config    ConfigModel
-	kernel    KernelModel
 	activeTab int
 	spinner   spinner.Model
 	width     int
@@ -40,9 +39,7 @@ func New(client *ctl.Client) Model {
 	s.Style = shared.SpinnerStyle
 	return Model{
 		client:  client,
-		tabs:    []shared.Tab{logs.New(client), profiles.New(client)},
-		config:  NewConfigModel(),
-		kernel:  NewKernelModel(),
+		tabs:    []shared.Tab{logs.New(client), profiles.New(client), kernel.New(client)},
 		spinner: s,
 	}
 }
@@ -71,7 +68,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the terminal from scrolling its own buffer (which would reveal
 		// content from before the TUI started).
 		if m.activeTab == 2 {
-			m.config.Update(msg)
+			m.tabs[2].Update(msg)
 		} else {
 			m.tabs[0].Update(msg)
 		}
@@ -97,8 +94,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateStatus(msg)
 	case profiles.ProfilesLoadedMsg, profiles.ProfileOpMsg:
 		return m.updateProfilesMsg(msg)
-	case configLoadedMsg, networkSettingsMsg, sectionEditMsg:
-		return m.updateConfigMsg(msg)
+	case kernel.ConfigLoadedMsg, kernel.NetworkSettingsMsg, kernel.SectionEditMsg:
+		return m.updateKernelMsg(msg)
 	}
 	return m, nil
 }
@@ -114,14 +111,16 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case m.activeTab == 1 && m.profilesPage().Importing():
 		return m.updateTabKey(msg)
-	case m.kernel.Editing():
-		return m.kernel.updateEdit(msg, m)
-	case m.kernel.EditingSection():
-		return m.kernel.updateSectionForm(msg, m)
-	case m.kernel.ViewingConfig():
-		return m.kernel.updateConfig(msg, m)
 	case m.activeTab == 1 && m.profilesPage().ConfirmingDel():
 		return m.updateTabKey(msg)
+	}
+	// The kernel page's popup (network-field editor, section editor, config
+	// viewer) consumes all keys while open. The modal state is global: it is
+	// only ever opened on the Config tab and swallows the tab-switch keys, so
+	// in practice it is never open on another tab.
+	if modal := m.tabs[2].Overlay(); modal != nil {
+		_, cmd := modal.Update(msg)
+		return m, cmd
 	}
 	switch key {
 	case "q", "ctrl+c":
@@ -130,8 +129,8 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 		return m, tea.Quit
 	case "1", "2", "3":
 		m.activeTab = int(key[0] - '1')
-		if m.activeTab == 2 && !m.kernel.network.loaded {
-			return m, fetchNetworkSettingsCmd(m.client)
+		if m.activeTab == 2 && !m.kernelPage().NetworkLoaded() {
+			return m, kernel.FetchNetworkSettings(m.client)
 		}
 	case "/":
 		if m.activeTab == 0 {
@@ -149,7 +148,7 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 		// Config tab: up/down/enter drive menu selection; the config viewer
 		// modal handles its own scrolling when open.
 		if m.activeTab == 2 {
-			return m.kernel.updateKeys(key, m)
+			return m.updateTabKey(msg)
 		}
 		// Profiles tab: selection keys drive the table; scroll keys fall
 		// through to the log viewport below.
@@ -176,6 +175,11 @@ func (m Model) profilesPage() *profiles.Model {
 	return m.tabs[1].(*profiles.Model)
 }
 
+// kernelPage returns the Kernel page stored in tabs[2].
+func (m Model) kernelPage() *kernel.Model {
+	return m.tabs[2].(*kernel.Model)
+}
+
 // updateTabKey routes a key press to the active tab page, storing the
 // returned page back into tabs and forwarding its command.
 func (m Model) updateTabKey(msg tea.Msg) (Model, tea.Cmd) {
@@ -187,7 +191,7 @@ func (m Model) updateTabKey(msg tea.Msg) (Model, tea.Cmd) {
 // View returns the rendered layout as a tea.View with mouse support enabled.
 // Narrow screens (under shared.NarrowWidth columns) get the bare log stream instead
 // of the frame — no frame, no tabs. Modal overlays are stacked on top of the
-// frame based on the kernel model's edit states.
+// frame based on the active page's Overlay.
 func (m Model) View() tea.View {
 	var content string
 	if m.width > 0 && m.width < shared.NarrowWidth {
@@ -196,14 +200,8 @@ func (m Model) View() tea.View {
 	} else {
 		content = m.frameView()
 	}
-	if m.kernel.Editing() {
-		content = components.OverlayModal(content, m.editInputView(), m.width, m.height)
-	}
-	if m.kernel.ViewingConfig() {
-		content = components.OverlayModal(content, m.configModal(m.width, m.height), m.width, m.height)
-		if m.kernel.EditingSection() {
-			content = components.OverlayModal(content, m.sectionFormView(), m.width, m.height)
-		}
+	if modal := m.tabs[2].Overlay(); modal != nil {
+		content = components.OverlayModal(content, modal.View(m.width, m.height), m.width, m.height)
 	}
 	v := tea.NewView(content)
 	v.MouseMode = tea.MouseModeCellMotion
@@ -233,4 +231,26 @@ func (m Model) updateProfilesMsg(msg tea.Msg) (Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// updateKernelMsg routes config fetches, network settings loads and section
+// edit results to the Kernel page. Errors surface on the root status bar;
+// successful results are forwarded to the page.
+func (m Model) updateKernelMsg(msg tea.Msg) (Model, tea.Cmd) {
+	var err error
+	switch msg := msg.(type) {
+	case kernel.ConfigLoadedMsg:
+		err = msg.Err
+	case kernel.NetworkSettingsMsg:
+		err = msg.Err
+	case kernel.SectionEditMsg:
+		err = msg.Err
+	}
+	if err != nil {
+		m.err = err
+		return m, nil
+	}
+	tab, cmd := m.tabs[2].Update(msg)
+	m.tabs[2] = tab
+	return m, cmd
 }

@@ -1,18 +1,15 @@
-package tui
+package kernel
 
 import (
 	"fmt"
 
-	tea "charm.land/bubbletea/v2"
 	"gopkg.in/yaml.v3"
-
-	"metacubexd-server-go/internal/ctl"
 )
 
-// networkSettings holds the editable network fields of the active config.
-type networkSettings struct {
-	values map[string]any // top-level keys: mixed-port, port, socks-port, tun
-	loaded bool
+// NetworkSettings holds the editable network fields of the active config.
+type NetworkSettings struct {
+	Values map[string]any // top-level keys: mixed-port, port, socks-port, tun
+	Loaded bool
 }
 
 // networkField describes one editable network entry.
@@ -34,11 +31,11 @@ var networkFields = []networkField{
 
 // valueOf returns the current value of a network field as a string. Absent tun
 // sub-fields fall back to mihomo's defaults (stack=mixed, device=Mihomo).
-func (ns networkSettings) valueOf(f networkField) string {
+func (ns NetworkSettings) valueOf(f networkField) string {
 	if f.sub == "" {
-		return fmtValue(ns.values[f.key])
+		return fmtValue(ns.Values[f.key])
 	}
-	if m, ok := ns.values["tun"].(map[string]any); ok {
+	if m, ok := ns.Values["tun"].(map[string]any); ok {
 		if v, ok := m[f.sub]; ok && v != nil {
 			return fmtValue(v)
 		}
@@ -54,13 +51,13 @@ func (ns networkSettings) valueOf(f networkField) string {
 
 // setField returns the (key, value) pair for PutSection when editing f with
 // the raw string raw. Tun sub-fields rebuild the whole tun object.
-func (ns networkSettings) setField(f networkField, raw string) (string, any) {
+func (ns NetworkSettings) setField(f networkField, raw string) (string, any) {
 	v := parseSectionValue(raw)
 	if f.sub == "" {
 		return f.key, v
 	}
 	tun := map[string]any{}
-	if m, ok := ns.values["tun"].(map[string]any); ok {
+	if m, ok := ns.Values["tun"].(map[string]any); ok {
 		for k, vv := range m {
 			tun[k] = vv
 		}
@@ -77,23 +74,10 @@ func fmtValue(v any) string {
 	return fmt.Sprint(v)
 }
 
-// fetchNetworkSettingsCmd loads the editable network fields from the runtime
-// config — the file mihomo actually runs — so injected and merged values (like
-// tun from a merge overlay) are included.
-func fetchNetworkSettingsCmd(c *ctl.Client) tea.Cmd {
-	return func() tea.Msg {
-		content, err := c.GetRuntimeConfig()
-		if err != nil {
-			return networkSettingsMsg{err: err}
-		}
-		return networkSettingsMsg{settings: parseNetworkSettings(content)}
-	}
-}
-
 // parseNetworkSettings extracts the editable network fields from a YAML config
 // body.
-func parseNetworkSettings(content string) networkSettings {
-	ns := networkSettings{values: map[string]any{}}
+func parseNetworkSettings(content string) NetworkSettings {
+	ns := NetworkSettings{Values: map[string]any{}}
 	var v any
 	if err := yaml.Unmarshal([]byte(content), &v); err != nil {
 		return ns
@@ -104,9 +88,9 @@ func parseNetworkSettings(content string) networkSettings {
 	}
 	for _, key := range []string{"mixed-port", "port", "socks-port", "tun"} {
 		if val, ok := top[key]; ok && val != nil {
-			ns.values[key] = val
+			ns.Values[key] = val
 		}
 	}
-	ns.loaded = true
+	ns.Loaded = true
 	return ns
 }

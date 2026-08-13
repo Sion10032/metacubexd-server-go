@@ -20,7 +20,8 @@ func (m Model) body(width, height int) string {
 		m.tabs[1].SetSize(width, height)
 		content = m.tabs[1].View()
 	case 2:
-		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(m.renderKernelTab())
+		m.kernelPage().SetStatus(m.state, m.err)
+		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(m.kernelPage().View())
 	default:
 		content = lipgloss.NewStyle().
 			Width(width).Height(height).
