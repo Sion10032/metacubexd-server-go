@@ -12,8 +12,17 @@ import (
 	"metacubexd-server-go/internal/ctl/tui/pages/kernel"
 	"metacubexd-server-go/internal/ctl/tui/pages/logs"
 	"metacubexd-server-go/internal/ctl/tui/pages/profiles"
+	"metacubexd-server-go/internal/ctl/tui/pages/proxies"
 	"metacubexd-server-go/internal/ctl/tui/shared"
 	"metacubexd-server-go/internal/supervisor"
+)
+
+// Tab indices.
+const (
+	idxLogs     = 0
+	idxProxy    = 1
+	idxProfiles = 2
+	idxKernel   = 3
 )
 
 // Model is the top-level Bubble Tea model. It owns the kernel state, the
@@ -39,7 +48,7 @@ func New(client *ctl.Client) Model {
 	s.Style = shared.SpinnerStyle
 	return Model{
 		client:  client,
-		tabs:    []shared.Tab{logs.New(client), profiles.New(client), kernel.New(client)},
+		tabs:    []shared.Tab{logs.New(client), proxies.New(client), profiles.New(client), kernel.New(client)},
 		spinner: s,
 	}
 }
@@ -67,16 +76,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Wheel events scroll the active viewport; capturing them here keeps
 		// the terminal from scrolling its own buffer (which would reveal
 		// content from before the TUI started).
-		if m.activeTab == 2 {
-			m.tabs[2].Update(msg)
+		if m.activeTab == idxKernel {
+			m.tabs[idxKernel].Update(msg)
 		} else {
-			m.tabs[0].Update(msg)
+			m.tabs[m.activeTab].Update(msg)
 		}
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		if msg.Height > shared.FrameRows {
-			m.tabs[0].SetSize(msg.Width-2, msg.Height-shared.FrameRows)
+			m.tabs[idxLogs].SetSize(msg.Width-2, msg.Height-shared.FrameRows)
 		}
 		return m, nil
 	case tea.BackgroundColorMsg:
@@ -94,6 +103,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateStatus(msg)
 	case profiles.ProfilesLoadedMsg, profiles.ProfileOpMsg:
 		return m.updateProfilesMsg(msg)
+	case proxies.ProxiesLoadedMsg, proxies.ProxyOpMsg, proxies.ModeLoadedMsg, proxies.ModeOpMsg:
+		return m.updateProxiesMsg(msg)
 	case kernel.ConfigLoadedMsg, kernel.NetworkSettingsMsg, kernel.SectionEditMsg:
 		return m.updateKernelMsg(msg)
 	}
@@ -114,30 +125,39 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 		m.quitting = true
 		m.closeLogStream()
 		return m, tea.Quit
-	case "1", "2", "3":
+	case "1", "2", "3", "4":
 		m.activeTab = int(key[0] - '1')
-		if m.activeTab == 2 && !m.kernelPage().NetworkLoaded() {
+		if m.activeTab == idxKernel && !m.kernelPage().NetworkLoaded() {
 			return m, kernel.FetchNetworkSettings(m.client)
 		}
+		if m.activeTab == idxProxy {
+			// Lazy load proxies on first visit
+			return m, tea.Batch(proxies.FetchProxies(m.client), proxies.FetchMode(m.client))
+		}
 	default:
-		// Scroll fallback: on any tab except Config, unhandled scroll keys
+		// Scroll fallback: on any tab except Kernel, unhandled scroll keys
 		// reach the log viewport. The whitelist keeps "/" and "f" from
 		// leaking into the logs page on other tabs.
-		if m.activeTab != 2 && shared.IsScrollKey(key) {
-			m.tabs[0].Update(msg)
+		if m.activeTab != idxKernel && shared.IsScrollKey(key) {
+			m.tabs[idxLogs].Update(msg)
 		}
 	}
 	return m, nil
 }
 
-// kernelPage returns the Kernel page stored in tabs[2].
+// kernelPage returns the Kernel page stored in tabs[idxKernel].
 func (m Model) kernelPage() *kernel.Model {
-	return m.tabs[2].(*kernel.Model)
+	return m.tabs[idxKernel].(*kernel.Model)
 }
 
-// profilesPage returns the Profiles page stored in tabs[1].
+// profilesPage returns the Profiles page stored in tabs[idxProfiles].
 func (m Model) profilesPage() *profiles.Model {
-	return m.tabs[1].(*profiles.Model)
+	return m.tabs[idxProfiles].(*profiles.Model)
+}
+
+// proxiesPage returns the Proxies page stored in tabs[idxProxy].
+func (m Model) proxiesPage() *proxies.Model {
+	return m.tabs[idxProxy].(*proxies.Model)
 }
 
 // View returns the rendered layout as a tea.View with mouse support enabled.
@@ -147,8 +167,8 @@ func (m Model) profilesPage() *profiles.Model {
 func (m Model) View() tea.View {
 	var content string
 	if m.width > 0 && m.width < shared.NarrowWidth {
-		m.tabs[0].SetSize(m.width, m.height)
-		content = m.tabs[0].View()
+		m.tabs[idxLogs].SetSize(m.width, m.height)
+		content = m.tabs[idxLogs].View()
 	} else {
 		content = m.frameView()
 	}

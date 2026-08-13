@@ -26,14 +26,14 @@ func (m Model) frameView() string {
 	// frame rows. SetSize here is a belt-and-suspenders re-scroll; the size is
 	// applied on WindowSizeMsg so the model's viewport is always current.
 	if h > shared.FrameRows {
-		m.tabs[0].SetSize(inner, h-shared.FrameRows)
+		m.tabs[idxLogs].SetSize(inner, h-shared.FrameRows)
 	}
 
 	statusLine := shared.RenderStatus(m.state, m.client.Endpoint())
 	if m.err != nil {
 		statusLine += "  " + shared.ErrorStyle.Render("⚠ "+m.errText())
 	}
-	if m.tabs[2].Busy() {
+	if m.tabs[idxKernel].Busy() {
 		statusLine += "  " + m.spinner.View() + " " + m.kernelPage().OperationLabel() + "…"
 	}
 
