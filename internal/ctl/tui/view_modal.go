@@ -63,8 +63,8 @@ func (m Model) sectionFormView() string {
 	inner := strings.Join([]string{
 		header,
 		sep,
-		m.sectionForm.key.View(),
-		m.sectionForm.value.View(),
+		m.kernel.sectionForm.key.View(),
+		m.kernel.sectionForm.value.View(),
 		sep,
 		footer,
 	}, "\n")
@@ -79,11 +79,11 @@ func (m Model) sectionFormView() string {
 // textinput with a header and a key-hint footer.
 func (m Model) editInputView() string {
 	const cw = 40
-	f := networkFields[m.editField]
+	f := networkFields[m.kernel.editField]
 	header := lipgloss.NewStyle().Bold(true).Width(cw).Align(lipgloss.Center).Render("Edit " + f.label)
 	sep := strings.Repeat("─", cw)
 	footer := lipgloss.NewStyle().Width(cw).Align(lipgloss.Center).Render("enter:save  esc:cancel")
-	inner := strings.Join([]string{header, sep, m.editInput.View(), sep, footer}, "\n")
+	inner := strings.Join([]string{header, sep, m.kernel.editInput.View(), sep, footer}, "\n")
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		Background(modalBackground).

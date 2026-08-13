@@ -34,8 +34,8 @@ func (m Model) frameView() string {
 	if m.err != nil {
 		statusLine += "  " + errorStyle.Render("⚠ "+m.errText())
 	}
-	if m.operating {
-		statusLine += "  " + m.spinner.View() + " " + kernelOps[m.kSelected].label + "…"
+	if m.kernel.operating {
+		statusLine += "  " + m.spinner.View() + " " + kernelOps[m.kernel.kSelected].label + "…"
 	}
 
 	// Second status line: the active profile summary.

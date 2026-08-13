@@ -287,7 +287,7 @@ func TestScrollOnEveryTab(t *testing.T) {
 		nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		nm, _ = nm.Update(configLoadedMsg{mode: configActive, content: strings.Repeat("line\n", 50)})
 		mdl := nm.(Model)
-		mdl.viewingConfig = true
+		mdl.kernel.viewingConfig = true
 		nm = mdl
 
 		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})

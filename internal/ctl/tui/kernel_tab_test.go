@@ -56,13 +56,13 @@ func TestKernelTabSelect(t *testing.T) {
 
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if got := nm.(Model).kSelected; got != 2 {
+	if got := nm.(Model).kernel.kSelected; got != 2 {
 		t.Errorf("kSelected after 2x down = %d, want 2", got)
 	}
 
 	// up wraps to the last entry.
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-	if got := nm.(Model).kSelected; got != 1 {
+	if got := nm.(Model).kernel.kSelected; got != 1 {
 		t.Errorf("kSelected after up = %d, want 1", got)
 	}
 }
@@ -85,7 +85,7 @@ func TestKernelTabExecute(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("enter returned no command")
 	}
-	if !nm.(Model).operating {
+	if !nm.(Model).kernel.operating {
 		t.Error("operating should be true while the operation runs")
 	}
 	runBatch(t, cmd) // spinner tick + kernel op
@@ -117,7 +117,7 @@ func _TestRecoverConfirm(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("confirm state should not issue a command")
 	}
-	if !nm.(Model).kConfirming {
+	if !nm.(Model).kernel.kConfirming {
 		t.Fatal("kConfirming should be true")
 	}
 	if got := nm.View().Content; !strings.Contains(got, "确认执行") {
@@ -147,7 +147,7 @@ func _TestRecoverConfirm(t *testing.T) {
 	if gotURI != "" {
 		t.Errorf("unexpected request after cancel: %q", gotURI)
 	}
-	if nm.(Model).kConfirming {
+	if nm.(Model).kernel.kConfirming {
 		t.Error("kConfirming should be false after cancel")
 	}
 }
