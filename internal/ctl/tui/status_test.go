@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 	"metacubexd-server-go/internal/supervisor"
 )
 
@@ -20,25 +21,25 @@ func TestRenderStatus(t *testing.T) {
 		Version:            "v1.19.29",
 		ExternalController: "127.0.0.1:9090",
 	}
-	got := renderStatus(st, "http://127.0.0.1:9097")
+	got := shared.RenderStatus(st, "http://127.0.0.1:9097")
 	for _, want := range []string{"running", "12345", "v1.19.29", "127.0.0.1:9090"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("renderStatus = %q, missing %q", got, want)
+			t.Errorf("shared.RenderStatus = %q, missing %q", got, want)
 		}
 	}
 	if !strings.Contains(got, "\x1b[") {
-		t.Errorf("renderStatus = %q, want ANSI color on status dot", got)
+		t.Errorf("shared.RenderStatus = %q, want ANSI color on status dot", got)
 	}
 
 	// nil state renders an unknown placeholder.
-	if got := renderStatus(nil, "http://127.0.0.1:9097"); !strings.Contains(got, "unknown") {
-		t.Errorf("renderStatus(nil) = %q, want unknown placeholder", got)
+	if got := shared.RenderStatus(nil, "http://127.0.0.1:9097"); !strings.Contains(got, "unknown") {
+		t.Errorf("shared.RenderStatus(nil) = %q, want unknown placeholder", got)
 	}
 
 	// Stopped kernel renders a grey dot and no pid.
 	stopped := &supervisor.KernelState{Status: supervisor.StatusStopped}
-	if got := renderStatus(stopped, "http://x"); !strings.Contains(got, "stopped") {
-		t.Errorf("renderStatus(stopped) = %q, want stopped", got)
+	if got := shared.RenderStatus(stopped, "http://x"); !strings.Contains(got, "stopped") {
+		t.Errorf("shared.RenderStatus(stopped) = %q, want stopped", got)
 	}
 }
 
@@ -48,7 +49,7 @@ func TestViewStatusBar(t *testing.T) {
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	pid := 42
-	nm, _ := m.Update(statusLoadedMsg{state: supervisor.KernelState{
+	nm, _ := m.Update(shared.StatusLoadedMsg{State: supervisor.KernelState{
 		Status:             supervisor.StatusRunning,
 		PID:                &pid,
 		Version:            "v1.19.29",
@@ -61,13 +62,13 @@ func TestViewStatusBar(t *testing.T) {
 		}
 	}
 
-	nm, _ = nm.Update(statusErrorMsg{err: errors.New("connection refused")})
+	nm, _ = nm.Update(shared.StatusErrorMsg{Err: errors.New("connection refused")})
 	if got := nm.View().Content; !strings.Contains(got, "connection refused") {
 		t.Errorf("View with error = %q, want error message", got)
 	}
 
 	// A 401 shows the friendly auth hint instead of the raw error.
-	nm, _ = nm.Update(statusErrorMsg{err: ctl.ErrUnauthorized})
+	nm, _ = nm.Update(shared.StatusErrorMsg{Err: ctl.ErrUnauthorized})
 	if got := nm.View().Content; !strings.Contains(got, "认证失败") {
 		t.Errorf("View with 401 = %q, want auth hint", got)
 	}

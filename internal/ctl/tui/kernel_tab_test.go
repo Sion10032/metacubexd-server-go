@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
 // runBatch executes every command in a batch, returning the produced messages.
@@ -34,7 +35,7 @@ func runBatch(t *testing.T, cmd tea.Cmd) []tea.Msg {
 func TestKernelTabRender(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	got := m.renderKernelTab()
-	plain := ansiRe.ReplaceAllString(got, "")
+	plain := shared.ANSIRe.ReplaceAllString(got, "")
 	for _, want := range []string{
 		"[kernel]", "Start", "Stop", "Restart",
 		"[network]", "mixed-port", "http-port", "socks-port", "tun-enable", "tun-device", "tun-stack",

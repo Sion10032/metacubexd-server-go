@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 	"metacubexd-server-go/internal/supervisor"
 )
 
@@ -46,9 +47,9 @@ func kernelOpCmd(c *ctl.Client, op func(*ctl.Client) (supervisor.KernelState, er
 	return func() tea.Msg {
 		st, err := op(c)
 		if err != nil {
-			return statusErrorMsg{err: err}
+			return shared.StatusErrorMsg{Err: err}
 		}
-		return statusLoadedMsg{state: st}
+		return shared.StatusLoadedMsg{State: st}
 	}
 }
 
@@ -124,19 +125,19 @@ func (k KernelModel) startKernelOp(op kernelOp, m Model) (Model, tea.Cmd) {
 // editable network fields (with current values), and the raw YAML viewer
 // entry. The selected entry is highlighted.
 func (m Model) renderKernelTab() string {
-	lines := []string{renderStatus(m.state, "")}
+	lines := []string{shared.RenderStatus(m.state, "")}
 	if m.err != nil {
-		lines = append(lines, errorStyle.Render("⚠ "+m.err.Error()))
+		lines = append(lines, shared.ErrorStyle.Render("⚠ "+m.err.Error()))
 	}
 	if m.state != nil && m.state.LastError != "" {
-		lines = append(lines, errorStyle.Render(m.state.LastError))
+		lines = append(lines, shared.ErrorStyle.Render(m.state.LastError))
 	}
 
 	lines = append(lines, "", "[kernel]")
 	for i, op := range kernelOps {
 		prefix, label := "  ", op.label
 		if i == m.kernel.kSelected {
-			prefix, label = "> ", selectedStyle.Render(op.label)
+			prefix, label = "> ", shared.SelectedStyle.Render(op.label)
 		}
 		lines = append(lines, prefix+label)
 	}
@@ -150,7 +151,7 @@ func (m Model) renderKernelTab() string {
 		}
 		prefix, label := "  ", fmt.Sprintf("%-12s %s", f.label, value)
 		if sel == m.kernel.kSelected {
-			prefix, label = "> ", selectedStyle.Render(label)
+			prefix, label = "> ", shared.SelectedStyle.Render(label)
 		}
 		lines = append(lines, prefix+label)
 	}
@@ -159,13 +160,13 @@ func (m Model) renderKernelTab() string {
 		sel := len(kernelOps) + len(networkFields)
 		prefix, label := "  ", "View YAML"
 		if sel == m.kernel.kSelected {
-			prefix, label = "> ", selectedStyle.Render(label)
+			prefix, label = "> ", shared.SelectedStyle.Render(label)
 		}
 		lines = append(lines, prefix+label)
 	}
 
 	if m.kernel.kConfirming {
-		lines = append(lines, "", errorStyle.Render("⚠ Recover 将重置 active config,确认执行? (y 确认 / 其他取消)"))
+		lines = append(lines, "", shared.ErrorStyle.Render("⚠ Recover 将重置 active config,确认执行? (y 确认 / 其他取消)"))
 	}
 	return strings.Join(lines, "\n")
 }

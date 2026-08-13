@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
 // TestSSEToView runs the real subscribe → event pump → model chain against a
@@ -38,12 +39,12 @@ func TestSSEToView(t *testing.T) {
 	m := New(client)
 
 	// Subscribe over real HTTP.
-	msg := subscribeCmd(client)()
-	sm, ok := msg.(subscribedMsg)
+	msg := shared.Subscribe(client)()
+	sm, ok := msg.(shared.SubscribedMsg)
 	if !ok {
-		t.Fatalf("subscribeCmd returned %T, want subscribedMsg", msg)
+		t.Fatalf("Subscribe returned %T, want shared.SubscribedMsg", msg)
 	}
-	defer sm.cancel()
+	defer sm.Cancel()
 
 	// Simulate the window size arriving before events (as in a real terminal).
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -54,10 +55,10 @@ func TestSSEToView(t *testing.T) {
 	for i := 0; i < 10 && len(got) < 3; i++ {
 		msg = cmd()
 		switch mm := msg.(type) {
-		case logMsg:
+		case shared.LogLineMsg:
 			nm, cmd = nm.Update(mm)
-			got = append(got, stripANSI(mm.line))
-		case stateMsg:
+			got = append(got, shared.StripANSI(mm.Line))
+		case shared.KernelStateMsg:
 			nm, cmd = nm.Update(mm)
 		default:
 			nm, cmd = nm.Update(msg)
@@ -77,10 +78,10 @@ func TestSSEToView(t *testing.T) {
 		t.Errorf("View missing last line:\n%s", v)
 	}
 
-	// Cancelling closes the stream: the next pump yields logClosedMsg.
-	sm.cancel()
+	// Cancelling closes the stream: the next pump yields shared.LogClosedMsg.
+	sm.Cancel()
 	msg = cmd()
-	if _, ok := msg.(logClosedMsg); !ok {
-		t.Errorf("after cancel, pump = %T, want logClosedMsg", msg)
+	if _, ok := msg.(shared.LogClosedMsg); !ok {
+		t.Errorf("after cancel, pump = %T, want shared.LogClosedMsg", msg)
 	}
 }

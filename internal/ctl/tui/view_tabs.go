@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
 // tabTitles are the tab names, one per index.
@@ -29,7 +31,7 @@ func renderTabs(active int) string {
 	for i, title := range tabTitles {
 		label := fmt.Sprintf("[%d] %s", i+1, title)
 		if i == active {
-			label = tabActiveStyle.Render(label)
+			label = shared.TabActiveStyle.Render(label)
 		}
 		b.WriteString(label)
 		b.WriteString("  ")

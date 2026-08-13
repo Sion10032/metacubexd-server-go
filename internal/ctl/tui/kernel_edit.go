@@ -8,6 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
 // startEditField opens the single-value editor for a network field, prefilled
@@ -189,7 +190,7 @@ func (m Model) updateConfigMsg(msg tea.Msg) (Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		return m, tea.Batch(fetchConfigCmd(m.client, m.config.mode), fetchStatusCmd(m.client), fetchNetworkSettingsCmd(m.client))
+		return m, tea.Batch(fetchConfigCmd(m.client, m.config.mode), shared.FetchStatus(m.client), fetchNetworkSettingsCmd(m.client))
 	}
 	return m, nil
 }

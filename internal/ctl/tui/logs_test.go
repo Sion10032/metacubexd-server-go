@@ -4,58 +4,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/ctl/tui/shared"
 )
-
-// TestFormatLogLine verifies the log line rendering: timestamp, INFO level
-// and the ERROR style for stderr.
-func TestFormatLogLine(t *testing.T) {
-	ts := time.Date(2025, 8, 12, 15, 30, 1, 0, time.Local).UnixMilli()
-
-	got := formatLogLine(supervisor.KernelLogLine{Stream: "stdout", Line: "inbound mixed port 7890 listening", TS: ts})
-	want := "2025-08-12 15:30:01 INFO   inbound mixed port 7890 listening"
-	if stripANSI(got) != want {
-		t.Errorf("formatLogLine = %q, want %q", stripANSI(got), want)
-	}
-
-	got = formatLogLine(supervisor.KernelLogLine{Stream: "stderr", Line: "boom", TS: ts})
-	if !strings.Contains(got, "ERROR") || !strings.Contains(stripANSI(got), "boom") {
-		t.Errorf("formatLogLine(stderr) = %q, want ERROR + line", stripANSI(got))
-	}
-}
-
-// TestParseLogEvent decodes SSE payloads into log/state messages.
-func TestParseLogEvent(t *testing.T) {
-	msg := parseLogEvent(ctl.Event{Data: `{"type":"log","stream":"stdout","line":"hello","ts":1723469401000}`})
-	lm, ok := msg.(logMsg)
-	if !ok {
-		t.Fatalf("parseLogEvent(log) = %T, want logMsg", msg)
-	}
-	if !strings.Contains(stripANSI(lm.line), "hello") {
-		t.Errorf("logMsg.line = %q, want hello", lm.line)
-	}
-
-	msg = parseLogEvent(ctl.Event{Data: `{"type":"state","status":"running","pid":42}`})
-	sm, ok := msg.(stateMsg)
-	if !ok {
-		t.Fatalf("parseLogEvent(state) = %T, want stateMsg", msg)
-	}
-	if sm.state.Status != supervisor.StatusRunning {
-		t.Errorf("stateMsg status = %q, want running", sm.state.Status)
-	}
-
-	if parseLogEvent(ctl.Event{Data: `{"type":"nope"}`}) != nil {
-		t.Error("unknown event type should be ignored")
-	}
-	if parseLogEvent(ctl.Event{Data: `{bad json`}) != nil {
-		t.Error("malformed JSON should be ignored")
-	}
-}
 
 // TestLogsAppend verifies lines accumulate in the viewport and the filter
 // drops non-matching lines.
@@ -187,8 +141,8 @@ func TestFilterInput(t *testing.T) {
 func TestFilterAppliesToHistory(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, _ = nm.Update(logMsg{line: "info: normal line"})
-	nm, _ = nm.Update(logMsg{line: "error: bad thing"})
+	nm, _ = nm.Update(shared.LogLineMsg{Line: "info: normal line"})
+	nm, _ = nm.Update(shared.LogLineMsg{Line: "error: bad thing"})
 
 	// Apply a filter through the input flow.
 	nm, _ = nm.Update(keyPress("/"))
@@ -218,7 +172,7 @@ func TestMouseWheelScroll(t *testing.T) {
 	mdl.logs.follow = false
 	nm = mdl
 	for i := 0; i < 50; i++ {
-		nm, _ = nm.Update(logMsg{line: fmt.Sprintf("scroll line %d", i)})
+		nm, _ = nm.Update(shared.LogLineMsg{Line: fmt.Sprintf("scroll line %d", i)})
 	}
 
 	nm, _ = nm.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
@@ -270,7 +224,7 @@ func TestScrollOnEveryTab(t *testing.T) {
 			mdl.logs.follow = false
 			nm = mdl
 			for i := 0; i < 50; i++ {
-				nm, _ = nm.Update(logMsg{line: fmt.Sprintf("scroll line %d", i)})
+				nm, _ = nm.Update(shared.LogLineMsg{Line: fmt.Sprintf("scroll line %d", i)})
 			}
 			nm, _ = nm.Update(keyPress(tab))
 
@@ -306,7 +260,7 @@ func TestViewportScroll(t *testing.T) {
 	mdl.logs.follow = false // inspect the scroll position
 	nm = mdl
 	for i := 0; i < 50; i++ {
-		nm, _ = nm.Update(logMsg{line: fmt.Sprintf("scroll line %d", i)})
+		nm, _ = nm.Update(shared.LogLineMsg{Line: fmt.Sprintf("scroll line %d", i)})
 	}
 
 	if got := nm.View().Content; !strings.Contains(got, "scroll line 0") {
@@ -347,9 +301,9 @@ func TestViewLogStream(t *testing.T) {
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, _ = nm.Update(logMsg{line: "hello kernel"})
+	nm, _ = nm.Update(shared.LogLineMsg{Line: "hello kernel"})
 
-	got := ansiRe.ReplaceAllString(nm.View().Content, "")
+	got := shared.ANSIRe.ReplaceAllString(nm.View().Content, "")
 	if !strings.Contains(got, "hello kernel") {
 		t.Errorf("View = %q, missing log line", got)
 	}

@@ -1,4 +1,4 @@
-package tui
+package shared
 
 import (
 	"fmt"
@@ -7,11 +7,11 @@ import (
 	"metacubexd-server-go/internal/supervisor"
 )
 
-// renderStatus renders the kernel status bar line: a colored status dot, the
+// RenderStatus renders the kernel status bar line: a colored status dot, the
 // state, pid, version and external controller address.
-func renderStatus(state *supervisor.KernelState, endpoint string) string {
+func RenderStatus(state *supervisor.KernelState, endpoint string) string {
 	if state == nil {
-		dot := statusStyle(supervisor.StatusStopped).Render("●")
+		dot := StatusStyle(supervisor.StatusStopped).Render("●")
 		return fmt.Sprintf("%s %-8s %-6s %s ec: %s", dot, "unknown", "-", "-", endpoint)
 	}
 	pid := "-"
@@ -22,6 +22,6 @@ func renderStatus(state *supervisor.KernelState, endpoint string) string {
 	if ec == "" {
 		ec = "-"
 	}
-	dot := statusStyle(state.Status).Render("●")
+	dot := StatusStyle(state.Status).Render("●")
 	return fmt.Sprintf("%s %-8s pid %-6s %s ec: %s", dot, state.Status, pid, state.Version, ec)
 }
