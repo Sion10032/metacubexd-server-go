@@ -38,7 +38,7 @@ func (m Model) frameView() string {
 	}
 
 	// Second status line: the active profile summary.
-	activeLine := m.profiles.ActiveSummary(m.profActive)
+	activeLine := m.profilesPage().ActiveSummary()
 
 	title := " mihomo-tui · " + m.client.Endpoint() + " "
 	// TEMP diagnostic: show the resolved window size until the short-window
@@ -49,10 +49,10 @@ func (m Model) frameView() string {
 	switch {
 	case logTab.Filtering():
 		help = logTab.Help()
-	case m.importing:
-		help = "import: tab:switch  enter:import  esc:cancel"
-	case m.confirmDel:
-		help = "⚠ 删除所选 profile? (y 确认 / 其他取消)"
+	case m.activeTab == 1:
+		// The Profiles page owns its footer (import form / delete confirm
+		// hints).
+		help = m.profilesPage().Help()
 	default:
 		// The Logs page owns its footer (follow state, filter input).
 		if m.activeTab == 0 {

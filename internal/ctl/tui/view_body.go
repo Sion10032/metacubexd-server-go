@@ -17,12 +17,8 @@ func (m Model) body(width, height int) string {
 	case 0:
 		content = m.tabs[0].View()
 	case 1:
-		if m.importing {
-			content = m.importFormView(width, height)
-		} else {
-			m.profiles.SetSize(width, height)
-			content = m.profiles.View()
-		}
+		m.tabs[1].SetSize(width, height)
+		content = m.tabs[1].View()
 	case 2:
 		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(m.renderKernelTab())
 	default:

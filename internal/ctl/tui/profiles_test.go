@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,49 +10,22 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
+	"metacubexd-server-go/internal/ctl/tui/pages/profiles"
 	"metacubexd-server-go/internal/ctl/tui/shared"
 	"metacubexd-server-go/internal/profile"
 )
-
-// TestProfilesSetRows verifies SetProfiles builds rows and marks the active
-// profile, and SelectedID follows the cursor.
-func TestProfilesSetRows(t *testing.T) {
-	p := NewProfilesModel()
-	p.SetSize(80, 10)
-	list := []profile.Meta{
-		{ID: "a", Name: "base", Type: "local", UpdatedAt: 1723456789000},
-		{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1723456789000},
-	}
-	p.SetProfiles(list, "b")
-	got := shared.ANSIRe.ReplaceAllString(p.View(), "")
-	if !strings.Contains(got, "base") || !strings.Contains(got, "sub") {
-		t.Errorf("table view missing profile names:\n%s", got)
-	}
-	if !strings.Contains(got, "●") {
-		t.Errorf("table view missing active marker:\n%s", got)
-	}
-	if id := p.SelectedID(); id != "a" {
-		t.Errorf("SelectedID = %q, want a (first row)", id)
-	}
-
-	// Empty list renders empty and SelectedID is empty.
-	p.SetProfiles(nil, "")
-	if id := p.SelectedID(); id != "" {
-		t.Errorf("SelectedID on empty list = %q, want empty", id)
-	}
-}
 
 // TestProfilesTabLoaded verifies loading profiles renders the table and the
 // status bar's second line shows the active profile summary.
 func TestProfilesTabLoaded(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, _ = nm.Update(profilesLoadedMsg{list: []profile.Meta{
+	nm, _ = nm.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{
 		{ID: "a", Name: "base", Type: "local", UpdatedAt: 1723456789000},
 		{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1723456789000},
 	}})
 	mdl := nm.(Model)
-	mdl.profActive = "b"
+	mdl.tabs[1].(*profiles.Model).SetActiveID("b")
 	nm = mdl
 
 	if got := nm.View().Content; !strings.Contains(got, "active: sub (remote)") {
@@ -79,18 +51,18 @@ func TestProfileActivateKey(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
 	nm, _ = nm.Update(keyPress("2")) // Profiles tab
 
 	nm, cmd := nm.Update(keyPress("a"))
 	if cmd == nil {
 		t.Fatal("a returned no command")
 	}
-	if nm.(Model).profActive != "b" {
-		t.Errorf("profActive = %q, want b", nm.(Model).profActive)
+	if got := nm.(Model).tabs[1].(*profiles.Model).ActiveID(); got != "b" {
+		t.Errorf("profActive = %q, want b", got)
 	}
-	if _, ok := cmd().(profileOpMsg); !ok {
-		t.Fatalf("cmd returned %T, want profileOpMsg", cmd())
+	if _, ok := cmd().(profiles.ProfileOpMsg); !ok {
+		t.Fatalf("cmd returned %T, want profiles.ProfileOpMsg", cmd())
 	}
 	if want := "POST /api/control/profiles/b/activate"; gotURI != want {
 		t.Errorf("request = %q, want %q", gotURI, want)
@@ -108,7 +80,7 @@ func TestProfileRefreshKey(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
 	nm, _ = nm.Update(keyPress("2"))
 
 	nm, cmd := nm.Update(keyPress("u"))
@@ -136,14 +108,14 @@ func TestProfileDeleteConfirm(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
 	nm, _ = nm.Update(keyPress("2"))
 
 	nm, cmd := nm.Update(keyPress("d"))
 	if cmd != nil {
 		t.Fatal("d should enter confirm state, not issue a command")
 	}
-	if !nm.(Model).confirmDel {
+	if !nm.(Model).tabs[1].(*profiles.Model).ConfirmingDel() {
 		t.Fatal("confirmDel should be true after d")
 	}
 	if got := nm.View().Content; !strings.Contains(got, "删除所选 profile") {
@@ -161,7 +133,7 @@ func TestProfileDeleteConfirm(t *testing.T) {
 
 	// Any other key cancels without issuing a request.
 	gotURI = ""
-	nm, _ = nm.Update(profilesLoadedMsg{list: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ = nm.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
 	nm, _ = nm.Update(keyPress("d"))
 	nm, cmd = nm.Update(keyPress("n"))
 	if cmd != nil {
@@ -170,75 +142,7 @@ func TestProfileDeleteConfirm(t *testing.T) {
 	if gotURI != "" {
 		t.Errorf("unexpected request after cancel: %q", gotURI)
 	}
-	if nm.(Model).confirmDel {
+	if nm.(Model).tabs[1].(*profiles.Model).ConfirmingDel() {
 		t.Error("confirmDel should reset after cancel")
-	}
-}
-
-// TestProfileImportInput verifies i opens the URL+name popup, tab switches to
-// the name field, and enter imports both.
-func TestProfileImportInput(t *testing.T) {
-	var gotURI, gotBody string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotURI = r.Method + " " + r.RequestURI
-		b, _ := io.ReadAll(r.Body)
-		gotBody = string(b)
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"id":"new","name":"my-sub","type":"remote","updatedAt":1}`)
-	}))
-	defer srv.Close()
-
-	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, _ = nm.Update(keyPress("2")) // Subscriptions tab
-	nm, _ = nm.Update(keyPress("i"))
-	if !nm.(Model).importing {
-		t.Fatal("importing should be true after i")
-	}
-	if nm.(Model).form.Focus != 0 {
-		t.Fatalf("initial focus = %d, want 0 (URL)", nm.(Model).form.Focus)
-	}
-	if got := shared.ANSIRe.ReplaceAllString(nm.View().Content, ""); !strings.Contains(got, "Import subscription") {
-		t.Errorf("View missing import popup:\n%s", got)
-	}
-	formView := shared.ANSIRe.ReplaceAllString(nm.(Model).importFormView(60, 10), "")
-	for _, border := range []string{"┌", "├", "└"} {
-		if !strings.Contains(formView, border) {
-			t.Errorf("import popup missing %q border:\n%s", border, formView)
-		}
-	}
-
-	for _, r := range "https://example.com/sub" {
-		nm, _ = nm.Update(keyPress(string(r)))
-	}
-	if got := nm.(Model).form.Fields[0].Value(); got != "https://example.com/sub" {
-		t.Errorf("url = %q, want the typed URL", got)
-	}
-
-	// tab moves focus to the name field.
-	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	if nm.(Model).form.Focus != 1 {
-		t.Fatalf("focus after tab = %d, want 1 (Name)", nm.(Model).form.Focus)
-	}
-	for _, r := range "my-sub" {
-		nm, _ = nm.Update(keyPress(string(r)))
-	}
-	if got := nm.(Model).form.Fields[1].Value(); got != "my-sub" {
-		t.Errorf("name = %q, want the typed name", got)
-	}
-
-	nm, cmd := nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("enter returned no command")
-	}
-	cmd()
-	if want := "POST /api/control/profiles/import"; gotURI != want {
-		t.Errorf("request = %q, want %q", gotURI, want)
-	}
-	if !strings.Contains(gotBody, "https://example.com/sub") {
-		t.Errorf("body = %q, want the URL", gotBody)
-	}
-	if !strings.Contains(gotBody, "\"name\":\"my-sub\"") {
-		t.Errorf("body = %q, want the name", gotBody)
 	}
 }
