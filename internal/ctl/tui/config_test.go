@@ -20,7 +20,7 @@ import (
 func TestConfigMenu(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, _ = nm.Update(keyPress("3"))
+	nm, _ = nm.Update(keyPress("4"))
 
 	got := shared.ANSIRe.ReplaceAllString(nm.View().Content, "")
 	for _, want := range []string{"Start", "Stop", "Restart", "mixed-port", "http-port", "socks-port", "tun-enable", "tun-device", "tun-stack", "View YAML"} {
@@ -43,7 +43,7 @@ func TestConfigViewerOpen(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, _ = nm.Update(keyPress("3")) // Config tab
+	nm, _ = nm.Update(keyPress("4")) // Config tab
 
 	// Move selection down to the View YAML entry (last).
 	for i := 0; i < kernel.ConfigMenuLen()-1; i++ {
@@ -53,7 +53,7 @@ func TestConfigViewerOpen(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("enter on View Config returned no command")
 	}
-	if !nm.(Model).tabs[2].(*kernel.Model).ViewingConfig() {
+	if !nm.(Model).tabs[3].(*kernel.Model).ViewingConfig() {
 		t.Fatal("viewingConfig should be true")
 	}
 	msg := cmd()
@@ -87,7 +87,7 @@ func TestConfigViewerToggle(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, _ = nm.Update(keyPress("3")) // Config tab
+	nm, _ = nm.Update(keyPress("4")) // Config tab
 	nm, _ = nm.Update(kernel.ConfigLoadedMsg{Mode: kernel.ConfigActive, Content: "active: true\n"})
 
 	// Move selection down to the View YAML entry and open the viewer.
@@ -100,7 +100,7 @@ func TestConfigViewerToggle(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("c returned no command")
 	}
-	if got := nm.(Model).tabs[2].(*kernel.Model).ConfigMode(); got != "runtime" {
+	if got := nm.(Model).tabs[3].(*kernel.Model).ConfigMode(); got != "runtime" {
 		t.Errorf("mode after c = %q, want runtime", got)
 	}
 	msg := cmd()
@@ -116,7 +116,7 @@ func TestConfigViewerToggle(t *testing.T) {
 func TestConfigViewerClose(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, _ = nm.Update(keyPress("3")) // Config tab
+	nm, _ = nm.Update(keyPress("4")) // Config tab
 
 	// Move selection down to the View YAML entry and open the viewer.
 	for i := 0; i < kernel.ConfigMenuLen()-1; i++ {
@@ -128,7 +128,7 @@ func TestConfigViewerClose(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("esc should not return a command")
 	}
-	if nm.(Model).tabs[2].(*kernel.Model).ViewingConfig() {
+	if nm.(Model).tabs[3].(*kernel.Model).ViewingConfig() {
 		t.Fatal("viewingConfig should be false after esc")
 	}
 }
@@ -148,7 +148,7 @@ func TestSectionEdit(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, _ = nm.Update(keyPress("3")) // Config tab
+	nm, _ = nm.Update(keyPress("4")) // Config tab
 
 	// Move selection down to the View YAML entry and open the viewer.
 	for i := 0; i < kernel.ConfigMenuLen()-1; i++ {
@@ -157,7 +157,7 @@ func TestSectionEdit(t *testing.T) {
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	nm, _ = nm.Update(keyPress("e"))
-	if !nm.(Model).tabs[2].(*kernel.Model).EditingSection() {
+	if !nm.(Model).tabs[3].(*kernel.Model).EditingSection() {
 		t.Fatal("editingSection should be true after e")
 	}
 
@@ -201,16 +201,16 @@ func TestNetworkFieldEdit(t *testing.T) {
 		Values: map[string]any{"mixed-port": 7890, "port": 7890, "socks-port": 7891},
 		Loaded: true,
 	}})
-	nm, _ = nm.Update(keyPress("3")) // Config tab
+	nm, _ = nm.Update(keyPress("4")) // Config tab
 
 	for i := 0; i < kernel.OpCount(); i++ {
 		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !nm.(Model).tabs[2].(*kernel.Model).Editing() {
+	if !nm.(Model).tabs[3].(*kernel.Model).Editing() {
 		t.Fatal("editing should be true after enter on mixed-port")
 	}
-	if got := nm.(Model).tabs[2].(*kernel.Model).EditFieldValue(); got != "7890" {
+	if got := nm.(Model).tabs[3].(*kernel.Model).EditFieldValue(); got != "7890" {
 		t.Errorf("editInput = %q, want 7890", got)
 	}
 
@@ -246,14 +246,14 @@ func TestTunFieldEdit(t *testing.T) {
 		Values: map[string]any{"tun": map[string]any{"enable": true, "device": "tun0", "stack": "system"}},
 		Loaded: true,
 	}})
-	nm, _ = nm.Update(keyPress("3"))
+	nm, _ = nm.Update(keyPress("4"))
 
 	// Move to tun-enable (index len(kernelOps)+3).
 	for i := 0; i < kernel.OpCount()+3; i++ {
 		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if got := nm.(Model).tabs[2].(*kernel.Model).EditFieldValue(); got != "true" {
+	if got := nm.(Model).tabs[3].(*kernel.Model).EditFieldValue(); got != "true" {
 		t.Errorf("editInput = %q, want true", got)
 	}
 

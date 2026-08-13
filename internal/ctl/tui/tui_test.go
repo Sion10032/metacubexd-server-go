@@ -24,7 +24,7 @@ func TestViewLayout(t *testing.T) {
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	got := shared.ANSIRe.ReplaceAllString(m.View().Content, "")
-	for _, want := range []string{"[1] Logs", "[2] Subscriptions", "[3] Config", "/:filter", "f:follow(ON)", "q:quit"} {
+	for _, want := range []string{"[1] Logs", "[2] Proxy", "[3] Subscriptions", "[4] Config", "/:filter", "f:follow(ON)", "q:quit"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("View = %q, missing %q", got, want)
 		}
@@ -42,7 +42,7 @@ func TestTabHelp(t *testing.T) {
 	}
 
 	// Profiles tab: profile operations.
-	nm, _ := m.Update(keyPress("2"))
+	nm, _ := m.Update(keyPress("3"))
 	got := nm.View().Content
 	for _, want := range []string{"a:activate", "u:refresh", "d:delete", "i:import"} {
 		if !strings.Contains(got, want) {
@@ -54,7 +54,7 @@ func TestTabHelp(t *testing.T) {
 	}
 
 	// Config tab: kernel selection.
-	nm, _ = nm.Update(keyPress("3"))
+	nm, _ = nm.Update(keyPress("4"))
 	if got := nm.View().Content; !strings.Contains(got, "enter:run") {
 		t.Errorf("Config footer missing enter:run:\n%s", got)
 	}
@@ -65,9 +65,9 @@ func TestTabHelp(t *testing.T) {
 func TestTabSwitch(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 
-	nm, _ := m.Update(keyPress("2"))
+	nm, _ := m.Update(keyPress("3"))
 	if got := nm.View().Content; !strings.Contains(got, "Name") {
-		t.Errorf("View after tab 2 = %q, want profiles table", got)
+		t.Errorf("View after tab 3 = %q, want profiles table", got)
 	}
 
 	nm, _ = nm.Update(keyPress("1"))
@@ -227,7 +227,7 @@ func keyPress(s string) tea.KeyPressMsg {
 // from the routing equivalence table).
 func TestNoFilterLeakOnOtherTabs(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	nm, _ := m.Update(keyPress("2")) // Profiles tab
+	nm, _ := m.Update(keyPress("3")) // Profiles tab
 
 	logsTab := nm.(Model).tabs[0].(*logs.Model)
 	if logsTab.Filtering() {
@@ -258,7 +258,7 @@ func TestKernelTabPgDnNoScroll(t *testing.T) {
 		nm, _ = nm.Update(shared.LogLineMsg{Line: fmt.Sprintf("line %d", i)})
 	}
 
-	nm, _ = nm.Update(keyPress("3")) // Config tab
+	nm, _ = nm.Update(keyPress("4")) // Config tab
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	mdl := nm.(Model)
 	if got := mdl.tabs[0].(*logs.Model).YOffset(); got != 0 {
@@ -270,15 +270,15 @@ func TestKernelTabPgDnNoScroll(t *testing.T) {
 // all keys including "1" which should not switch tabs (scenario #12).
 func TestKeyConfirmingSwallowsTabKeys(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	nm, _ := m.Update(keyPress("3")) // Config tab
-	kernelTab := nm.(Model).tabs[2].(*kernel.Model)
+	nm, _ := m.Update(keyPress("4")) // Config tab
+	kernelTab := nm.(Model).tabs[3].(*kernel.Model)
 	if kernelTab.Confirming() {
 		t.Fatal("should not be confirming initially")
 	}
 	// Simulate kConfirming by setting it directly (Recover is commented out,
 	// so we cannot trigger it via the menu).
 	mdl := nm.(Model)
-	mdl.tabs[2].(*kernel.Model).ResetOperation()
+	mdl.tabs[3].(*kernel.Model).ResetOperation()
 	nm = mdl
 
 	// We can't easily trigger kConfirming through the menu since Recover is

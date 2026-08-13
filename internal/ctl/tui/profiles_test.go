@@ -25,14 +25,14 @@ func TestProfilesTabLoaded(t *testing.T) {
 		{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1723456789000},
 	}})
 	mdl := nm.(Model)
-	mdl.tabs[1].(*profiles.Model).SetActiveID("b")
+	mdl.tabs[2].(*profiles.Model).SetActiveID("b")
 	nm = mdl
 
 	if got := nm.View().Content; !strings.Contains(got, "active: sub (remote)") {
 		t.Errorf("View missing active profile summary:\n%s", got)
 	}
 
-	nm, _ = nm.Update(keyPress("2"))
+	nm, _ = nm.Update(keyPress("3"))
 	got := shared.ANSIRe.ReplaceAllString(nm.View().Content, "")
 	if !strings.Contains(got, "sub") || !strings.Contains(got, "●") {
 		t.Errorf("profiles tab missing table content:\n%s", got)
@@ -52,13 +52,13 @@ func TestProfileActivateKey(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
-	nm, _ = nm.Update(keyPress("2")) // Profiles tab
+	nm, _ = nm.Update(keyPress("3")) // Profiles tab
 
 	nm, cmd := nm.Update(keyPress("a"))
 	if cmd == nil {
 		t.Fatal("a returned no command")
 	}
-	if got := nm.(Model).tabs[1].(*profiles.Model).ActiveID(); got != "b" {
+	if got := nm.(Model).tabs[2].(*profiles.Model).ActiveID(); got != "b" {
 		t.Errorf("profActive = %q, want b", got)
 	}
 	if _, ok := cmd().(profiles.ProfileOpMsg); !ok {
@@ -81,7 +81,7 @@ func TestProfileRefreshKey(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
-	nm, _ = nm.Update(keyPress("2"))
+	nm, _ = nm.Update(keyPress("3"))
 
 	nm, cmd := nm.Update(keyPress("u"))
 	if cmd == nil {
@@ -109,13 +109,13 @@ func TestProfileDeleteConfirm(t *testing.T) {
 
 	m := New(ctl.NewClient(srv.URL, "", false))
 	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
-	nm, _ = nm.Update(keyPress("2"))
+	nm, _ = nm.Update(keyPress("3"))
 
 	nm, cmd := nm.Update(keyPress("d"))
 	if cmd != nil {
 		t.Fatal("d should enter confirm state, not issue a command")
 	}
-	if !nm.(Model).tabs[1].(*profiles.Model).ConfirmingDel() {
+	if !nm.(Model).tabs[2].(*profiles.Model).ConfirmingDel() {
 		t.Fatal("confirmDel should be true after d")
 	}
 	if got := nm.View().Content; !strings.Contains(got, "删除所选 profile") {
@@ -142,7 +142,7 @@ func TestProfileDeleteConfirm(t *testing.T) {
 	if gotURI != "" {
 		t.Errorf("unexpected request after cancel: %q", gotURI)
 	}
-	if nm.(Model).tabs[1].(*profiles.Model).ConfirmingDel() {
+	if nm.(Model).tabs[2].(*profiles.Model).ConfirmingDel() {
 		t.Error("confirmDel should reset after cancel")
 	}
 }

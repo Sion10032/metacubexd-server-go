@@ -2,6 +2,7 @@ package ctl
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -422,4 +423,134 @@ func TestConfigBackupRestore(t *testing.T) {
 			t.Errorf("request = %q, want %q", gotURI, want)
 		}
 	})
+}
+
+// TestListProxies verifies ListProxies decodes the proxies response.
+func TestListProxies(t *testing.T) {
+	const body = `{"proxies":{"G":{"name":"G","type":"Selector","now":"A","all":["A","B"]}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.RequestURI != "/api/clash/proxies" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.RequestURI)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", false)
+	resp, err := c.ListProxies()
+	if err != nil {
+		t.Fatalf("ListProxies: %v", err)
+	}
+	proxy, ok := resp.Proxies["G"]
+	if !ok {
+		t.Fatal("proxy G not found")
+	}
+	if proxy.Now != "A" {
+		t.Errorf("Now = %q, want A", proxy.Now)
+	}
+	if len(proxy.All) != 2 || proxy.All[0] != "A" || proxy.All[1] != "B" {
+		t.Errorf("All = %v, want [A,B]", proxy.All)
+	}
+}
+
+// TestSelectProxy verifies SelectProxy sends PUT with the correct body.
+func TestSelectProxy(t *testing.T) {
+	var gotURI, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.Method + " " + r.RequestURI
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", false)
+	if err := c.SelectProxy("G", "B"); err != nil {
+		t.Fatalf("SelectProxy: %v", err)
+	}
+	if want := "PUT /api/clash/proxies/G"; gotURI != want {
+		t.Errorf("request = %q, want %q", gotURI, want)
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.Name != "B" {
+		t.Errorf("body.name = %q, want B", body.Name)
+	}
+}
+
+// TestSelectProxyError verifies error propagation from SelectProxy.
+func TestSelectProxyError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":"invalid group"}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", false)
+	err := c.SelectProxy("bad", "node")
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid group") {
+		t.Errorf("error = %q, want server message", err)
+	}
+}
+
+// TestGetMode verifies GetMode decodes the mode field.
+func TestGetMode(t *testing.T) {
+	const body = `{"mode":"rule","port":7890}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.RequestURI != "/api/clash/configs" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.RequestURI)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", false)
+	mode, err := c.GetMode()
+	if err != nil {
+		t.Fatalf("GetMode: %v", err)
+	}
+	if mode != "rule" {
+		t.Errorf("mode = %q, want rule", mode)
+	}
+}
+
+// TestSetMode verifies SetMode sends PATCH with the correct body.
+func TestSetMode(t *testing.T) {
+	var gotURI, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.Method + " " + r.RequestURI
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", false)
+	if err := c.SetMode("global"); err != nil {
+		t.Fatalf("SetMode: %v", err)
+	}
+	if want := "PATCH /api/clash/configs"; gotURI != want {
+		t.Errorf("request = %q, want %q", gotURI, want)
+	}
+	var body struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.Mode != "global" {
+		t.Errorf("body.mode = %q, want global", body.Mode)
+	}
 }

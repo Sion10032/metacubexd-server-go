@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"metacubexd-server-go/internal/profile"
@@ -303,4 +304,113 @@ func (c *Client) postKernel(path string) (supervisor.KernelState, error) {
 	}
 	defer resp.Body.Close()
 	return decodeState(resp)
+}
+
+// Proxy describes a single proxy entry in mihomo's /proxies response.
+type Proxy struct {
+	Name string   `json:"name"`
+	Type string   `json:"type"`          // Selector / URLTest / Fallback / Direct / Reject / ...
+	Now  string   `json:"now,omitempty"` // Current node for groups
+	All  []string `json:"all,omitempty"` // Member names for groups
+}
+
+// ProxiesResponse is the response from GET /api/clash/proxies.
+// Order preserves the original key order from the JSON response.
+type ProxiesResponse struct {
+	Proxies map[string]Proxy `json:"proxies"`
+	Order   []string         `json:"-"` // original key order from API
+}
+
+// UnmarshalJSON implements json.Unmarshaler to preserve the key order of the
+// proxies map. Go's map iteration is random, so without this the proxy-groups
+// list would appear in a different order each refresh.
+func (r *ProxiesResponse) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Proxies map[string]Proxy `json:"proxies"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.Proxies = raw.Proxies
+
+	// Re-extract key order from raw JSON bytes.
+	var wrapper struct {
+		Proxies json.RawMessage `json:"proxies"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return err
+	}
+	r.Order = orderedJSONKeys(wrapper.Proxies)
+	return nil
+}
+
+// orderedJSONKeys extracts object keys in their original order from raw JSON.
+func orderedJSONKeys(raw json.RawMessage) []string {
+	var keys []string
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	// read '{'
+	if _, err := dec.Token(); err != nil {
+		return nil
+	}
+	for dec.More() {
+		// read key string
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		if key, ok := tok.(string); ok {
+			keys = append(keys, key)
+		}
+		// skip value by decoding into interface{}
+		var skip interface{}
+		if err := dec.Decode(&skip); err != nil {
+			break
+		}
+	}
+	return keys
+}
+
+// ClashConfig is a partial response from GET /api/clash/configs (only mode).
+type ClashConfig struct {
+	Mode string `json:"mode"` // rule / global / direct
+}
+
+// ListProxies fetches all proxies from mihomo.
+func (c *Client) ListProxies() (ProxiesResponse, error) {
+	var resp ProxiesResponse
+	if err := c.doJSON(http.MethodGet, "/api/clash/proxies", nil, &resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
+}
+
+// SelectProxy switches a Selector group to the given node.
+func (c *Client) SelectProxy(group, name string) error {
+	body, err := json.Marshal(struct {
+		Name string `json:"name"`
+	}{name})
+	if err != nil {
+		return err
+	}
+	return c.doJSON(http.MethodPut, "/api/clash/proxies/"+url.PathEscape(group), bytes.NewReader(body), nil)
+}
+
+// GetMode fetches the current mihomo mode.
+func (c *Client) GetMode() (string, error) {
+	var cfg ClashConfig
+	if err := c.doJSON(http.MethodGet, "/api/clash/configs", nil, &cfg); err != nil {
+		return "", err
+	}
+	return cfg.Mode, nil
+}
+
+// SetMode switches the mihomo mode (rule/global/direct).
+func (c *Client) SetMode(mode string) error {
+	body, err := json.Marshal(struct {
+		Mode string `json:"mode"`
+	}{mode})
+	if err != nil {
+		return err
+	}
+	return c.doJSON(http.MethodPatch, "/api/clash/configs", bytes.NewReader(body), nil)
 }
