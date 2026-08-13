@@ -162,3 +162,34 @@ func (k KernelModel) updateSectionForm(msg tea.Msg, m Model) (Model, tea.Cmd) {
 func sectionEditCmd(c *ctl.Client, key, value string) tea.Cmd {
 	return putSectionCmd(c, key, parseSectionValue(value))
 }
+
+// updateConfigMsg handles config fetches, network settings loads and section
+// edit results; successful edits refresh the config, status and network
+// fields.
+func (m Model) updateConfigMsg(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case configLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		if msg.mode == m.config.mode {
+			m.config.SetContent(msg.content)
+		}
+		return m, nil
+	case networkSettingsMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.kernel.network = msg.settings
+		return m, nil
+	case sectionEditMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		return m, tea.Batch(fetchConfigCmd(m.client, m.config.mode), fetchStatusCmd(m.client), fetchNetworkSettingsCmd(m.client))
+	}
+	return m, nil
+}

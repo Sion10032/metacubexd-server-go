@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -88,6 +89,29 @@ func (l *LogsModel) render() {
 // stripANSI removes SGR escape sequences for plain-text matching.
 func stripANSI(s string) string {
 	return ansiRe.ReplaceAllString(s, "")
+}
+
+// updateFilter handles the filter input state: enter applies, esc cancels,
+// backspace deletes, other single characters append.
+func (m Model) updateFilter(key string) Model {
+	switch key {
+	case "enter":
+		m.logs.SetFilter(m.filterInput)
+		m.filterInput = ""
+		m.filtering = false
+	case "esc":
+		m.filterInput = ""
+		m.filtering = false
+	case "backspace":
+		if r := []rune(m.filterInput); len(r) > 0 {
+			m.filterInput = string(r[:len(r)-1])
+		}
+	default:
+		if utf8.RuneCountInString(key) == 1 {
+			m.filterInput += key
+		}
+	}
+	return m
 }
 
 // View renders the viewport contents, or a centered hint filling the whole

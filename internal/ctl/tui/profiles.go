@@ -92,3 +92,24 @@ func (p ProfilesModel) ActiveSummary(activeID string) string {
 	}
 	return "active: " + activeID
 }
+
+// updateProfilesMsg handles profile list loads and operation results; after a
+// successful operation the list and kernel status are refreshed.
+func (m Model) updateProfilesMsg(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case profilesLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.profiles.SetProfiles(msg.list, m.profActive)
+		return m, nil
+	case profileOpMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		return m, tea.Batch(fetchProfilesCmd(m.client), fetchStatusCmd(m.client))
+	}
+	return m, nil
+}

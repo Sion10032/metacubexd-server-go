@@ -3,6 +3,7 @@ package tui
 import (
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
@@ -78,4 +79,31 @@ func statusTick() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg {
 		return tickMsg{}
 	})
+}
+
+// updateStatus handles the kernel status messages: fresh states, errors and
+// the periodic tick; the spinner keeps animating while an operation runs.
+func (m Model) updateStatus(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case statusLoadedMsg:
+		m.state = &msg.state
+		m.kernel.operating = false
+		m.kernel.kConfirming = false
+		return m, nil
+	case statusErrorMsg:
+		m.err = msg.err
+		m.kernel.operating = false
+		m.kernel.kConfirming = false
+		return m, nil
+	case spinner.TickMsg:
+		if m.kernel.operating {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	case tickMsg:
+		return m, tea.Batch(fetchStatusCmd(m.client), statusTick())
+	}
+	return m, nil
 }
