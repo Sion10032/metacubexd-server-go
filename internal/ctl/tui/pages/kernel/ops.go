@@ -46,7 +46,7 @@ var kernelTick tea.Cmd = func() tea.Msg {
 
 // startKernelOp marks the operation as running, starts the spinner and issues
 // the operation command.
-func (m *Model) startKernelOp(op kernelOp) (shared.Tab, tea.Cmd) {
+func (m *Model) startKernelOp(op kernelOp) (shared.Tab, tea.Cmd, bool) {
 	m.operating = true
-	return m, tea.Batch(kernelOpCmd(m.client, op.op), kernelTick)
+	return m, tea.Batch(kernelOpCmd(m.client, op.op), kernelTick), true
 }

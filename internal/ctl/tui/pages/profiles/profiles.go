@@ -101,32 +101,34 @@ func (m *Model) SetProfiles(list []profile.Meta, activeID string) {
 // Update implements shared.Tab: profile loads refresh the table, operation
 // results re-fetch the list and the kernel status, and key presses drive the
 // current state (import form, delete confirm, operations or the table).
-func (m *Model) Update(msg tea.Msg) (shared.Tab, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (shared.Tab, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		return m.updateKey(msg)
 	case ProfilesLoadedMsg:
 		m.SetProfiles(msg.List, m.activeID)
-		return m, nil
+		return m, nil, false
 	case ProfileOpMsg:
 		if msg.Err != nil {
-			return m, nil
+			return m, nil, false
 		}
-		return m, tea.Batch(FetchProfiles(m.client), shared.FetchStatus(m.client))
+		return m, tea.Batch(FetchProfiles(m.client), shared.FetchStatus(m.client)), false
 	}
-	return m, nil
+	return m, nil, false
 }
 
 // updateKey routes a key press by current state: the import form first, then
 // the delete confirmation, then the operations (a/u/d/i) and the table
 // selection keys.
-func (m *Model) updateKey(msg tea.Msg) (shared.Tab, tea.Cmd) {
+func (m *Model) updateKey(msg tea.Msg) (shared.Tab, tea.Cmd, bool) {
 	key := msg.(tea.KeyPressMsg).String()
 	if m.importing {
-		return m.updateImport(msg)
+		tab, cmd, _ := m.updateImport(msg)
+		return tab, cmd, true
 	}
 	if m.confirmDel {
-		return m.updateConfirmDel(key)
+		tab, cmd, _ := m.updateConfirmDel(key)
+		return tab, cmd, true
 	}
 	switch key {
 	case "a":
@@ -135,30 +137,32 @@ func (m *Model) updateKey(msg tea.Msg) (shared.Tab, tea.Cmd) {
 			return m, profileOpCmd(m.client, func() error {
 				_, err := m.client.ProfileActivate(id)
 				return err
-			})
+			}), true
 		}
+		return m, nil, true // no selection: still consumed (matches current guard behavior)
 	case "u":
 		if id := m.SelectedID(); id != "" {
 			return m, profileOpCmd(m.client, func() error {
 				_, err := m.client.ProfileRefresh(id)
 				return err
-			})
+			}), true
 		}
+		return m, nil, true
 	case "d":
 		if m.SelectedID() != "" {
 			m.confirmDel = true
 		}
+		return m, nil, true
 	case "i":
 		m.importing = true
 		m.form = newImportForm()
-		return m, m.form.Fields[0].Focus()
+		return m, m.form.Fields[0].Focus(), true
 	default:
-		// Selection keys drive the table.
+		// Table selection keys are consumed; scroll and other keys fall through.
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
-		return m, cmd
+		return m, cmd, key == "up" || key == "down" || key == "enter"
 	}
-	return m, nil
 }
 
 // View implements shared.Tab: the import form replaces the table body while

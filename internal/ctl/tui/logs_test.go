@@ -171,13 +171,17 @@ func TestScrollOnEveryTab(t *testing.T) {
 	t.Run("config viewer", func(t *testing.T) {
 		m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 		nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		nm, _ = nm.Update(keyPress("3")) // Config tab
 		nm, _ = nm.Update(kernel.ConfigLoadedMsg{Mode: kernel.ConfigActive, Content: strings.Repeat("line\n", 50)})
-		mdl := nm.(Model)
-		mdl.tabs[2].(*kernel.Model).SetViewingConfig(true)
-		nm = mdl
+
+		// Move selection down to the View YAML entry and open the viewer.
+		for i := 0; i < kernel.ConfigMenuLen()-1; i++ {
+			nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		}
+		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
-		mdl = nm.(Model)
+		mdl := nm.(Model)
 		if YOffset := mdl.tabs[2].(*kernel.Model).ConfigYOffset(); YOffset == 0 {
 			t.Errorf("PgDn in config viewer did not scroll the config viewport (YOffset=0)")
 		}

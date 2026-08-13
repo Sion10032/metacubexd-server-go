@@ -17,7 +17,7 @@ func (m Model) updateProfilesMsg(msg tea.Msg) (Model, tea.Cmd) {
 			m.err = msg.Err
 			return m, nil
 		}
-		tab, cmd := m.tabs[1].Update(msg)
+		tab, cmd, _ := m.tabs[1].Update(msg)
 		m.tabs[1] = tab
 		return m, cmd
 	case profiles.ProfileOpMsg:
@@ -25,7 +25,7 @@ func (m Model) updateProfilesMsg(msg tea.Msg) (Model, tea.Cmd) {
 			m.err = msg.Err
 			return m, nil
 		}
-		tab, cmd := m.tabs[1].Update(msg)
+		tab, cmd, _ := m.tabs[1].Update(msg)
 		m.tabs[1] = tab
 		return m, cmd
 	}
@@ -49,7 +49,7 @@ func (m Model) updateKernelMsg(msg tea.Msg) (Model, tea.Cmd) {
 		m.err = err
 		return m, nil
 	}
-	tab, cmd := m.tabs[2].Update(msg)
+	tab, cmd, _ := m.tabs[2].Update(msg)
 	m.tabs[2] = tab
 	return m, cmd
 }

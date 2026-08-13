@@ -27,7 +27,7 @@ func newImportForm() components.Form {
 // updateImport drives the import popup: tab switches the focused field, enter
 // imports the entered URL+name, esc cancels; other keys feed the focused
 // textinput.
-func (m *Model) updateImport(msg tea.Msg) (shared.Tab, tea.Cmd) {
+func (m *Model) updateImport(msg tea.Msg) (shared.Tab, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
@@ -35,7 +35,7 @@ func (m *Model) updateImport(msg tea.Msg) (shared.Tab, tea.Cmd) {
 			m.importing = false
 			m.form.Fields[0].Reset()
 			m.form.Fields[1].Reset()
-			return m, nil
+			return m, nil, true
 		case "enter":
 			url := strings.TrimSpace(m.form.Fields[0].Value())
 			name := strings.TrimSpace(m.form.Fields[1].Value())
@@ -43,16 +43,16 @@ func (m *Model) updateImport(msg tea.Msg) (shared.Tab, tea.Cmd) {
 			m.form.Fields[0].Reset()
 			m.form.Fields[1].Reset()
 			if url == "" {
-				return m, nil
+				return m, nil, true
 			}
-			return m, importCmd(m.client, url, name)
+			return m, importCmd(m.client, url, name), true
 		default:
 			var cmd tea.Cmd
 			m.form, cmd = m.form.Update(msg)
-			return m, cmd
+			return m, cmd, true
 		}
 	}
-	return m, nil
+	return m, nil, true
 }
 
 // importFormView renders the import popup as a bordered modal: a bold header,

@@ -84,33 +84,38 @@ func (m *Model) SetFilter(filter string) {
 // Update implements shared.Tab: filter keystrokes while the filter input is
 // active, "/" to start filtering, "f" to toggle follow, scroll/wheel
 // messages for the viewport, and shared.LogLineMsg to append a line.
-func (m *Model) Update(msg tea.Msg) (shared.Tab, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (shared.Tab, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		key := msg.String()
 		if m.filtering {
 			m.UpdateFilterKey(key)
-			return m, nil
+			return m, nil, true
 		}
 		switch key {
 		case "/":
 			m.StartFilter()
+			return m, nil, true
 		case "f":
 			m.ToggleFollow()
+			return m, nil, true
 		default:
-			var cmd tea.Cmd
-			m.viewport, cmd = m.viewport.Update(msg)
-			return m, cmd
+			if shared.IsScrollKey(key) {
+				var cmd tea.Cmd
+				m.viewport, cmd = m.viewport.Update(msg)
+				return m, cmd, true
+			}
+			return m, nil, false
 		}
 	case tea.MouseMsg:
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
-		return m, cmd
+		return m, cmd, true
 	case shared.LogLineMsg:
 		m.append(msg.Line)
-		return m, nil
+		return m, nil, true
 	}
-	return m, nil
+	return m, nil, false
 }
 
 // Filtering reports whether the filter input is active.

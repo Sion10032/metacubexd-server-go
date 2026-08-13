@@ -92,52 +92,67 @@ func (m *Model) SetStatus(state *supervisor.KernelState, err error) {
 // Update implements shared.Tab: menu/selection keys while the Config tab is
 // active, mouse wheels forwarded to the config viewer, and the config fetch /
 // network settings / section edit results.
-func (m *Model) Update(msg tea.Msg) (shared.Tab, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (shared.Tab, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		return m.updateKey(msg.String())
+		return m.updateKey(msg)
 	case tea.MouseMsg:
 		var cmd tea.Cmd
 		m.config.Update(msg)
-		return m, cmd
+		return m, cmd, false
 	case ConfigLoadedMsg:
 		if msg.Mode == m.config.mode {
 			m.config.SetContent(msg.Content)
 		}
-		return m, nil
+		return m, nil, false
 	case NetworkSettingsMsg:
 		m.network = msg.Settings
-		return m, nil
+		return m, nil, false
 	case SectionEditMsg:
-		return m, tea.Batch(FetchConfig(m.client, m.config.mode), shared.FetchStatus(m.client), FetchNetworkSettings(m.client))
+		return m, tea.Batch(FetchConfig(m.client, m.config.mode), shared.FetchStatus(m.client), FetchNetworkSettings(m.client)), false
 	}
-	return m, nil
+	return m, nil, false
 }
 
 // updateKey handles selection and execution while the Config tab is active.
 // The Recover confirmation state (kConfirming) is kept for when Recover is
-// re-enabled.
-func (m *Model) updateKey(key string) (shared.Tab, tea.Cmd) {
-	menuLen := ConfigMenuLen()
+// re-enabled. Overlay keys (editing, section, viewer, kConfirming) are
+// consumed here so the root never touches them.
+func (m *Model) updateKey(msg tea.Msg) (shared.Tab, tea.Cmd, bool) {
+	key := msg.(tea.KeyPressMsg).String()
+
+	// Overlay states swallow all keys — match the old root Overlay() check.
+	if m.editing {
+		return m, m.updateEdit(msg), true
+	}
+	if m.editingSection {
+		return m, m.updateSectionForm(msg), true
+	}
+	if m.viewingConfig {
+		return m, m.updateConfig(msg), true
+	}
 	if m.kConfirming {
 		m.kConfirming = false
 		if key == "y" || key == "Y" {
 			return m.startKernelOp(kernelOps[m.kSelected])
 		}
-		return m, nil
+		return m, nil, true // cancel — still consumed
 	}
+	menuLen := ConfigMenuLen()
 	switch key {
 	case "up", "k":
 		m.kSelected = (m.kSelected + menuLen - 1) % menuLen
+		return m, nil, true
 	case "down", "j":
 		m.kSelected = (m.kSelected + 1) % menuLen
+		return m, nil, true
 	case "enter", "space":
 		switch {
 		case m.kSelected < len(kernelOps):
 			op := kernelOps[m.kSelected]
 			if op.label == "Recover" {
 				m.kConfirming = true
-				return m, nil
+				return m, nil, true
 			}
 			return m.startKernelOp(op)
 		case m.kSelected < len(kernelOps)+len(networkFields):
@@ -145,10 +160,10 @@ func (m *Model) updateKey(key string) (shared.Tab, tea.Cmd) {
 		default:
 			m.viewingConfig = true
 			m.config.ResetScroll()
-			return m, FetchConfig(m.client, m.config.mode)
+			return m, FetchConfig(m.client, m.config.mode), true
 		}
 	}
-	return m, nil
+	return m, nil, false
 }
 
 // updateConfig drives the config viewer modal: esc closes, e opens the
