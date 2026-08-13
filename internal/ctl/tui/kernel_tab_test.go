@@ -29,13 +29,17 @@ func runBatch(t *testing.T, cmd tea.Cmd) []tea.Msg {
 	return msgs
 }
 
-// TestKernelTabRender verifies the kernel tab lists every operation with the
-// selected entry highlighted.
+// TestKernelTabRender verifies the Config tab lists every operation, the
+// network fields and the raw YAML viewer, with the selected entry highlighted.
 func TestKernelTabRender(t *testing.T) {
-
-	got := renderKernelTab(nil, 0, nil, false)
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	got := m.renderKernelTab()
 	plain := ansiRe.ReplaceAllString(got, "")
-	for _, want := range []string{"Start", "Stop", "Restart"} {
+	for _, want := range []string{
+		"[kernel]", "Start", "Stop", "Restart",
+		"[network]", "mixed-port", "http-port", "socks-port", "tun-enable", "tun-device", "tun-stack",
+		"View YAML",
+	} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("kernel tab = %q, missing %q", plain, want)
 		}

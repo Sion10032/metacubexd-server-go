@@ -14,6 +14,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"gopkg.in/yaml.v3"
 
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/profile"
@@ -23,29 +24,35 @@ import (
 // Model is the top-level Bubble Tea model. It owns the kernel state, the log
 // viewport and the current tab.
 type Model struct {
-	client        *ctl.Client
-	state         *supervisor.KernelState
-	err           error
-	logs          LogsModel
-	profiles      ProfilesModel
-	config        ConfigModel
-	profActive    string
-	importing     bool
-	form          importForm
-	confirmDel    bool
-	viewingConfig bool
-	activeTab     int
-	kSelected     int
-	kConfirming   bool
-	operating     bool
-	spinner       spinner.Model
-	filtering     bool
-	filterInput   string
-	width         int
-	height        int
-	logCh         <-chan ctl.Event
-	logCancel     context.CancelFunc
-	quitting      bool
+	client         *ctl.Client
+	state          *supervisor.KernelState
+	err            error
+	logs           LogsModel
+	profiles       ProfilesModel
+	config         ConfigModel
+	profActive     string
+	importing      bool
+	form           importForm
+	confirmDel     bool
+	viewingConfig  bool
+	network        networkSettings
+	editing        bool
+	editField      int
+	editInput      textinput.Model
+	editingSection bool
+	sectionForm    sectionForm
+	activeTab      int
+	kSelected      int
+	kConfirming    bool
+	operating      bool
+	spinner        spinner.Model
+	filtering      bool
+	filterInput    string
+	width          int
+	height         int
+	logCh          <-chan ctl.Event
+	logCancel      context.CancelFunc
+	quitting       bool
 }
 
 // New returns a Model for the given control API client.
@@ -107,6 +114,18 @@ type configLoadedMsg struct {
 	err     error
 }
 
+// sectionEditMsg carries the result of a config section edit.
+type sectionEditMsg struct {
+	err error
+}
+
+// networkSettingsMsg carries the fetched network settings of the active
+// config.
+type networkSettingsMsg struct {
+	settings networkSettings
+	err      error
+}
+
 // Init returns the initial commands: fetch kernel status, poll it every
 // second, subscribe to the SSE log stream and load the profile list.
 func (m Model) Init() tea.Cmd {
@@ -149,6 +168,108 @@ func fetchConfigCmd(c *ctl.Client, mode int) tea.Cmd {
 		}
 		return configLoadedMsg{mode: mode, content: content, err: err}
 	}
+}
+
+// networkSettings holds the editable network fields of the active config.
+type networkSettings struct {
+	values map[string]any // top-level keys: mixed-port, port, socks-port, tun
+	loaded bool
+}
+
+// networkField describes one editable network entry.
+type networkField struct {
+	label string
+	key   string // top-level config key
+	sub   string // tun sub-key ("" for top-level scalars)
+}
+
+// networkFields lists the editable network entries in display order.
+var networkFields = []networkField{
+	{"mixed-port", "mixed-port", ""},
+	{"http-port", "port", ""},
+	{"socks-port", "socks-port", ""},
+	{"tun-enable", "tun", "enable"},
+	{"tun-device", "tun", "device"},
+	{"tun-stack", "tun", "stack"},
+}
+
+// valueOf returns the current value of a network field as a string. Absent tun
+// sub-fields fall back to mihomo's defaults (stack=mixed, device=Mihomo).
+func (ns networkSettings) valueOf(f networkField) string {
+	if f.sub == "" {
+		return fmtValue(ns.values[f.key])
+	}
+	if m, ok := ns.values["tun"].(map[string]any); ok {
+		if v, ok := m[f.sub]; ok && v != nil {
+			return fmtValue(v)
+		}
+	}
+	switch f.sub {
+	case "stack":
+		return "mixed"
+	case "device":
+		return "Mihomo"
+	}
+	return ""
+}
+
+// setField returns the (key, value) pair for PutSection when editing f with
+// the raw string raw. Tun sub-fields rebuild the whole tun object.
+func (ns networkSettings) setField(f networkField, raw string) (string, any) {
+	v := parseSectionValue(raw)
+	if f.sub == "" {
+		return f.key, v
+	}
+	tun := map[string]any{}
+	if m, ok := ns.values["tun"].(map[string]any); ok {
+		for k, vv := range m {
+			tun[k] = vv
+		}
+	}
+	tun[f.sub] = v
+	return "tun", tun
+}
+
+// fmtValue renders a config value for display.
+func fmtValue(v any) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprint(v)
+}
+
+// fetchNetworkSettingsCmd loads the editable network fields from the runtime
+// config — the file mihomo actually runs — so injected and merged values (like
+// tun from a merge overlay) are included.
+func fetchNetworkSettingsCmd(c *ctl.Client) tea.Cmd {
+	return func() tea.Msg {
+		content, err := c.GetRuntimeConfig()
+		if err != nil {
+			return networkSettingsMsg{err: err}
+		}
+		return networkSettingsMsg{settings: parseNetworkSettings(content)}
+	}
+}
+
+// parseNetworkSettings extracts the editable network fields from a YAML config
+// body.
+func parseNetworkSettings(content string) networkSettings {
+	ns := networkSettings{values: map[string]any{}}
+	var v any
+	if err := yaml.Unmarshal([]byte(content), &v); err != nil {
+		return ns
+	}
+	top, ok := v.(map[string]any)
+	if !ok {
+		return ns
+	}
+	for _, key := range []string{"mixed-port", "port", "socks-port", "tun"} {
+		if val, ok := top[key]; ok && val != nil {
+			ns.values[key] = val
+		}
+	}
+	ns.loaded = true
+	return ns
 }
 
 // profileOpCmd runs a profile operation; on success the caller refreshes the
@@ -334,6 +455,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m, cmd = m.updateImport(msg)
 			return m, cmd
 		}
+		if m.editing {
+			var cmd tea.Cmd
+			m, cmd = m.updateEditInput(msg)
+			return m, cmd
+		}
+		if m.editingSection {
+			var cmd tea.Cmd
+			m, cmd = m.updateSectionForm(msg)
+			return m, cmd
+		}
 		if m.viewingConfig {
 			var cmd tea.Cmd
 			m, cmd = m.updateConfigViewer(msg)
@@ -358,6 +489,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "1", "2", "3":
 			m.activeTab = int(key[0] - '1')
+			if m.activeTab == 2 && !m.network.loaded {
+				return m, fetchNetworkSettingsCmd(m.client)
+			}
 		case "/":
 			if m.activeTab == 0 {
 				m.filtering = true
@@ -501,6 +635,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.config.SetContent(msg.content)
 		}
 		return m, nil
+	case networkSettingsMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.network = msg.settings
+		return m, nil
+	case sectionEditMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		return m, tea.Batch(fetchConfigCmd(m.client, m.config.mode), fetchStatusCmd(m.client), fetchNetworkSettingsCmd(m.client))
 	case tickMsg:
 		return m, tea.Batch(fetchStatusCmd(m.client), statusTick())
 	}
@@ -567,21 +714,17 @@ var kernelOps = []kernelOp{
 	// {"Recover", (*ctl.Client).KernelRecover},
 }
 
-// configMenuEntries returns the selectable labels on the Config tab: the
-// kernel operations plus the config viewer entry.
-func configMenuEntries() []string {
-	entries := make([]string, 0, len(kernelOps)+1)
-	for _, op := range kernelOps {
-		entries = append(entries, op.label)
-	}
-	return append(entries, "View Config")
+// configMenuLen is the number of selectable entries on the Config tab: kernel
+// ops + network fields + the raw YAML viewer.
+func configMenuLen() int {
+	return len(kernelOps) + len(networkFields) + 1
 }
 
 // updateKernelKeys handles selection and execution while the Config tab is
 // active. The Recover confirmation state (kConfirming) is kept for when
 // Recover is re-enabled.
 func (m Model) updateKernelKeys(key string) (Model, tea.Cmd) {
-	menuLen := len(configMenuEntries())
+	menuLen := configMenuLen()
 	if m.kConfirming {
 		m.kConfirming = false
 		if key == "y" || key == "Y" {
@@ -595,19 +738,73 @@ func (m Model) updateKernelKeys(key string) (Model, tea.Cmd) {
 	case "down", "j":
 		m.kSelected = (m.kSelected + 1) % menuLen
 	case "enter", "space":
-		if m.kSelected == len(kernelOps) {
+		switch {
+		case m.kSelected < len(kernelOps):
+			op := kernelOps[m.kSelected]
+			if op.label == "Recover" {
+				m.kConfirming = true
+				return m, nil
+			}
+			return m.startKernelOp(op)
+		case m.kSelected < len(kernelOps)+len(networkFields):
+			return m.startEditField(m.kSelected - len(kernelOps))
+		default:
 			m.viewingConfig = true
 			m.config.ResetScroll()
 			return m, fetchConfigCmd(m.client, m.config.mode)
 		}
-		op := kernelOps[m.kSelected]
-		if op.label == "Recover" {
-			m.kConfirming = true
-			return m, nil
-		}
-		return m.startKernelOp(op)
 	}
 	return m, nil
+}
+
+// startEditField opens the single-value editor for a network field, prefilled
+// with its current value.
+func (m Model) startEditField(i int) (Model, tea.Cmd) {
+	m.editing = true
+	m.editField = i
+	in := textinput.New()
+	in.Prompt = ""
+	in.SetWidth(40)
+	in.SetValue(m.network.valueOf(networkFields[i]))
+	m.editInput = in
+	return m, in.Focus()
+}
+
+// updateEditInput drives the network field editor: enter saves via PutSection,
+// esc cancels.
+func (m Model) updateEditInput(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "esc":
+			m.editing = false
+			return m, nil
+		case "enter":
+			raw := strings.TrimSpace(m.editInput.Value())
+			m.editing = false
+			if raw == "" {
+				return m, nil
+			}
+			key, value := m.network.setField(networkFields[m.editField], raw)
+			return m, putSectionCmd(m.client, key, value)
+		default:
+			var cmd tea.Cmd
+			m.editInput, cmd = m.editInput.Update(msg)
+			return m, cmd
+		}
+	}
+	return m, nil
+}
+
+// putSectionCmd replaces one top-level key with a parsed value and restarts
+// the kernel.
+func putSectionCmd(c *ctl.Client, key string, value any) tea.Cmd {
+	return func() tea.Msg {
+		if err := c.PutSection(key, value, true); err != nil {
+			return sectionEditMsg{err: err}
+		}
+		return sectionEditMsg{}
+	}
 }
 
 // updateConfigViewer drives the config viewer modal: esc closes, c toggles
@@ -619,6 +816,10 @@ func (m Model) updateConfigViewer(msg tea.Msg) (Model, tea.Cmd) {
 		case "esc":
 			m.viewingConfig = false
 			return m, nil
+		case "e":
+			m.editingSection = true
+			m.sectionForm = newSectionForm()
+			return m, m.sectionForm.key.Focus()
 		case "c":
 			m.config.ToggleMode()
 			m.config.ResetScroll()
@@ -628,6 +829,81 @@ func (m Model) updateConfigViewer(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// sectionForm bundles the two textinputs of the section editor popup.
+type sectionForm struct {
+	key   textinput.Model
+	value textinput.Model
+	focus int // 0 = key, 1 = value
+}
+
+// newSectionForm builds a section editor popup with the key field focused.
+func newSectionForm() sectionForm {
+	key := textinput.New()
+	key.Prompt = "Key:   "
+	key.Placeholder = "mixed-port"
+	key.SetWidth(50)
+	value := textinput.New()
+	value.Prompt = "Value: "
+	value.Placeholder = "7890"
+	value.SetWidth(50)
+	return sectionForm{key: key, value: value}
+}
+
+// parseSectionValue parses the entered value as YAML so a plain scalar maps to
+// its natural Go type (int, bool, ...); anything unparseable stays a string.
+func parseSectionValue(s string) any {
+	var v any
+	if err := yaml.Unmarshal([]byte(s), &v); err == nil {
+		return v
+	}
+	return s
+}
+
+// updateSectionForm drives the section editor popup: tab switches fields,
+// enter saves via PutSection, esc cancels.
+func (m Model) updateSectionForm(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "esc":
+			m.editingSection = false
+			return m, nil
+		case "tab":
+			m.sectionForm.focus = 1 - m.sectionForm.focus
+			if m.sectionForm.focus == 0 {
+				m.sectionForm.value.Blur()
+				return m, m.sectionForm.key.Focus()
+			}
+			m.sectionForm.key.Blur()
+			return m, m.sectionForm.value.Focus()
+		case "enter":
+			key := strings.TrimSpace(m.sectionForm.key.Value())
+			value := strings.TrimSpace(m.sectionForm.value.Value())
+			m.editingSection = false
+			if key == "" {
+				return m, nil
+			}
+			return m, sectionEditCmd(m.client, key, value)
+		default:
+			if m.sectionForm.focus == 0 {
+				var cmd tea.Cmd
+				m.sectionForm.key, cmd = m.sectionForm.key.Update(msg)
+				return m, cmd
+			}
+			var cmd tea.Cmd
+			m.sectionForm.value, cmd = m.sectionForm.value.Update(msg)
+			return m, cmd
+		}
+	}
+	return m, nil
+}
+
+// sectionEditCmd replaces one top-level key with a YAML-parsed value and
+// restarts the kernel.
+func sectionEditCmd(c *ctl.Client, key, value string) tea.Cmd {
+	return putSectionCmd(c, key, parseSectionValue(value))
 }
 
 // startKernelOp marks the operation as running, starts the spinner and issues
@@ -648,8 +924,14 @@ func (m Model) View() tea.View {
 	} else {
 		content = m.frameView()
 	}
+	if m.editing {
+		content = overlayModal(content, m.editInputView(), m.width, m.height)
+	}
 	if m.viewingConfig {
 		content = overlayModal(content, m.configModal(m.width, m.height), m.width, m.height)
+		if m.editingSection {
+			content = overlayModal(content, m.sectionFormView(), m.width, m.height)
+		}
 	}
 	v := tea.NewView(content)
 	v.MouseMode = tea.MouseModeCellMotion
@@ -787,13 +1069,52 @@ func (m Model) configModal(w, h int) string {
 	title := "View Config (" + m.config.Mode() + ")"
 	header := lipgloss.NewStyle().Bold(true).Width(cw).Align(lipgloss.Center).Render(title)
 	sep := strings.Repeat("─", cw)
-	footer := lipgloss.NewStyle().Width(cw).Align(lipgloss.Center).Render("c:active/runtime  ↑↓:scroll  esc:close")
+	footer := lipgloss.NewStyle().Width(cw).Align(lipgloss.Center).Render("c:active/runtime  e:edit  ↑↓:scroll  esc:close")
 	viewHeight := h - 10
 	if viewHeight < 1 {
 		viewHeight = 1
 	}
 	m.config.SetSize(cw, viewHeight)
 	inner := strings.Join([]string{header, sep, m.config.View(), sep, footer}, "\n")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Background(modalBackground).
+		Width(cw + 2).
+		Render(inner)
+}
+
+// sectionFormView renders the section editor popup: key and value textinputs
+// with a header and a key-hint footer.
+func (m Model) sectionFormView() string {
+	const cw = 60
+	title := "Edit Section"
+	header := lipgloss.NewStyle().Bold(true).Width(cw).Align(lipgloss.Center).Render(title)
+	sep := strings.Repeat("─", cw)
+	footer := lipgloss.NewStyle().Width(cw).Align(lipgloss.Center).Render("tab:switch  enter:save  esc:cancel")
+	inner := strings.Join([]string{
+		header,
+		sep,
+		m.sectionForm.key.View(),
+		m.sectionForm.value.View(),
+		sep,
+		footer,
+	}, "\n")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Background(modalBackground).
+		Width(cw + 2).
+		Render(inner)
+}
+
+// editInputView renders the network field editor popup: a single prefilled
+// textinput with a header and a key-hint footer.
+func (m Model) editInputView() string {
+	const cw = 40
+	f := networkFields[m.editField]
+	header := lipgloss.NewStyle().Bold(true).Width(cw).Align(lipgloss.Center).Render("Edit " + f.label)
+	sep := strings.Repeat("─", cw)
+	footer := lipgloss.NewStyle().Width(cw).Align(lipgloss.Center).Render("enter:save  esc:cancel")
+	inner := strings.Join([]string{header, sep, m.editInput.View(), sep, footer}, "\n")
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		Background(modalBackground).
@@ -817,7 +1138,7 @@ func (m Model) body(width, height int) string {
 			content = m.profiles.View()
 		}
 	case 2:
-		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(renderKernelTab(m.state, m.kSelected, m.err, m.kConfirming))
+		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(m.renderKernelTab())
 	default:
 		content = lipgloss.NewStyle().
 			Width(width).Height(height).
@@ -869,27 +1190,51 @@ func frameRow(content string, inner int) string {
 	return "│" + lipgloss.PlaceHorizontal(inner, lipgloss.Left, content) + "│"
 }
 
-// renderKernelTab renders the kernel control section of the Config tab:
-// state summary, last error and the operation list with the selection
-// highlighted. The config viewport (renderConfigTab) renders below this
-// section. When confirming, a destructive-operation prompt is appended.
-func renderKernelTab(state *supervisor.KernelState, selected int, err error, confirming bool) string {
-	lines := []string{renderStatus(state, "")}
-	if err != nil {
-		lines = append(lines, errorStyle.Render("⚠ "+err.Error()))
+// renderKernelTab renders the Config tab body: the kernel operation list, the
+// editable network fields (with current values), and the raw YAML viewer
+// entry. The selected entry is highlighted.
+func (m Model) renderKernelTab() string {
+	lines := []string{renderStatus(m.state, "")}
+	if m.err != nil {
+		lines = append(lines, errorStyle.Render("⚠ "+m.err.Error()))
 	}
-	if state != nil && state.LastError != "" {
-		lines = append(lines, errorStyle.Render(state.LastError))
+	if m.state != nil && m.state.LastError != "" {
+		lines = append(lines, errorStyle.Render(m.state.LastError))
 	}
-	lines = append(lines, "", "config:")
-	for i, label := range configMenuEntries() {
-		prefix := "  "
-		if i == selected {
+
+	lines = append(lines, "", "[kernel]")
+	for i, op := range kernelOps {
+		prefix, label := "  ", op.label
+		if i == m.kSelected {
+			prefix, label = "> ", selectedStyle.Render(op.label)
+		}
+		lines = append(lines, prefix+label)
+	}
+
+	lines = append(lines, "", "[network]")
+	for i, f := range networkFields {
+		sel := len(kernelOps) + i
+		value := m.network.valueOf(f)
+		if value == "" {
+			value = "—"
+		}
+		prefix, label := "  ", fmt.Sprintf("%-12s %s", f.label, value)
+		if sel == m.kSelected {
 			prefix, label = "> ", selectedStyle.Render(label)
 		}
 		lines = append(lines, prefix+label)
 	}
-	if confirming {
+
+	{
+		sel := len(kernelOps) + len(networkFields)
+		prefix, label := "  ", "View YAML"
+		if sel == m.kSelected {
+			prefix, label = "> ", selectedStyle.Render(label)
+		}
+		lines = append(lines, prefix+label)
+	}
+
+	if m.kConfirming {
 		lines = append(lines, "", errorStyle.Render("⚠ Recover 将重置 active config,确认执行? (y 确认 / 其他取消)"))
 	}
 	return strings.Join(lines, "\n")
