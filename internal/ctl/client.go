@@ -375,6 +375,37 @@ type ClashConfig struct {
 	Mode string `json:"mode"` // rule / global / direct
 }
 
+// ConnectionMetadata is the peer metadata for a single connection.
+type ConnectionMetadata struct {
+	Network         string `json:"network"`          // tcp / udp
+	Type            string `json:"type"`             // HTTP / SOCKS / TCP / ...
+	SourceIP        string `json:"sourceIP"`
+	DestinationIP   string `json:"destinationIP"`
+	SourcePort      string `json:"sourcePort"`
+	DestinationPort string `json:"destinationPort"`
+	Host            string `json:"host"`             // SNI / Host header (may be empty)
+	ProcessPath     string `json:"processPath"`
+}
+
+// Connection is a single connection returned by GET /connections.
+type Connection struct {
+	ID          string             `json:"id"`
+	Upload      int64              `json:"upload"`
+	Download    int64              `json:"download"`
+	Start       string             `json:"start"`     // RFC3339 timestamp
+	Chains      []string           `json:"chains"`    // outbound chain: [group, node, ...]
+	Rule        string             `json:"rule"`
+	RulePayload string             `json:"rulePayload"`
+	Metadata    ConnectionMetadata `json:"metadata"`
+}
+
+// ConnectionsResponse is the response from GET /connections.
+type ConnectionsResponse struct {
+	DownloadTotal int64        `json:"downloadTotal"`
+	UploadTotal   int64        `json:"uploadTotal"`
+	Connections   []Connection `json:"connections"`
+}
+
 // ListProxies fetches all proxies from mihomo.
 func (c *Client) ListProxies() (ProxiesResponse, error) {
 	var resp ProxiesResponse
@@ -413,4 +444,23 @@ func (c *Client) SetMode(mode string) error {
 		return err
 	}
 	return c.doJSON(http.MethodPatch, "/api/clash/configs", bytes.NewReader(body), nil)
+}
+
+// ListConnections fetches the current connection snapshot.
+func (c *Client) ListConnections() (ConnectionsResponse, error) {
+	var resp ConnectionsResponse
+	if err := c.doJSON(http.MethodGet, "/api/clash/connections", nil, &resp); err != nil {
+		return resp, err
+	}
+	return resp, nil
+}
+
+// CloseConnection closes the connection with the given id.
+func (c *Client) CloseConnection(id string) error {
+	return c.doJSON(http.MethodDelete, "/api/clash/connections/"+url.PathEscape(id), nil, nil)
+}
+
+// CloseAllConnections closes all active connections.
+func (c *Client) CloseAllConnections() error {
+	return c.doJSON(http.MethodDelete, "/api/clash/connections", nil, nil)
 }

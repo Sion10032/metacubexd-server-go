@@ -20,7 +20,7 @@ func (m Model) updateStatus(msg tea.Msg) (Model, tea.Cmd) {
 		m.kernelPage().ResetOperation()
 		return m, nil
 	case spinner.TickMsg:
-		if m.tabs[3].Busy() {
+		if m.tabs[idxKernel].Busy() {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd

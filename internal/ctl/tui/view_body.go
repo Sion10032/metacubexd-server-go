@@ -13,6 +13,9 @@ import (
 func (m Model) body(width, height int) string {
 	var content string
 	switch m.activeTab {
+	case idxConnection:
+		m.tabs[idxConnection].SetSize(width, height)
+		content = m.tabs[idxConnection].View()
 	case idxLogs:
 		content = m.tabs[idxLogs].View()
 	case idxProxy:
@@ -25,7 +28,7 @@ func (m Model) body(width, height int) string {
 		m.kernelPage().SetStatus(m.state, m.err)
 		content = lipgloss.NewStyle().Height(height).MaxHeight(height).Render(m.kernelPage().View())
 	default:
-		// Defensive: the active tab is always one of 0..3 (set by the 1/2/3/4
+		// Defensive: the active tab is always one of 0..4 (set by the 1/2/3/4/5
 		// keys), so this branch is unreachable in practice.
 		content = lipgloss.NewStyle().
 			Width(width).Height(height).

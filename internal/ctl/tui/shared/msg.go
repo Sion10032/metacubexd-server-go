@@ -38,3 +38,6 @@ type KernelStateMsg struct {
 
 // LogClosedMsg fires when the SSE log stream ends.
 type LogClosedMsg struct{}
+
+// ConnectionTickMsg fires periodically to refresh the connections list.
+type ConnectionTickMsg struct{}

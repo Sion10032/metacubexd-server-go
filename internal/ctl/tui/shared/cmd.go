@@ -33,3 +33,10 @@ func StatusTick() tea.Cmd {
 		return TickMsg{}
 	})
 }
+
+// ConnectionTick schedules the next connection refresh one second from now.
+func ConnectionTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return ConnectionTickMsg{}
+	})
+}

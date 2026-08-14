@@ -17,28 +17,29 @@ import (
 // filter and esc cancels without changing it.
 func TestFilterInput(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	nm, _ := m.Update(keyPress("4")) // switch to Logs tab
 
-	nm, _ := m.Update(keyPress("/"))
-	if !nm.(Model).tabs[0].(*logs.Model).Filtering() {
+	nm, _ = nm.Update(keyPress("/"))
+	if !nm.(Model).tabs[idxLogs].(*logs.Model).Filtering() {
 		t.Fatal("filtering should be true after /")
 	}
 
 	for _, r := range "err" {
 		nm, _ = nm.Update(keyPress(string(r)))
 	}
-	if got := nm.(Model).tabs[0].(*logs.Model).FilterInput(); got != "err" {
+	if got := nm.(Model).tabs[idxLogs].(*logs.Model).FilterInput(); got != "err" {
 		t.Errorf("filterInput = %q, want err", got)
 	}
 
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mdl := nm.(Model)
-	if mdl.tabs[0].(*logs.Model).Filtering() || mdl.tabs[0].(*logs.Model).Filter() != "err" {
-		t.Errorf("after enter: filtering=%v filter=%q", mdl.tabs[0].(*logs.Model).Filtering(), mdl.tabs[0].(*logs.Model).Filter())
+	if mdl.tabs[idxLogs].(*logs.Model).Filtering() || mdl.tabs[idxLogs].(*logs.Model).Filter() != "err" {
+		t.Errorf("after enter: filtering=%v filter=%q", mdl.tabs[idxLogs].(*logs.Model).Filtering(), mdl.tabs[idxLogs].(*logs.Model).Filter())
 	}
 
 	// Re-entering prefills the current filter so it can be edited or cleared.
 	nm, _ = mdl.Update(keyPress("/"))
-	if got := nm.(Model).tabs[0].(*logs.Model).FilterInput(); got != "err" {
+	if got := nm.(Model).tabs[idxLogs].(*logs.Model).FilterInput(); got != "err" {
 		t.Errorf("filterInput after / = %q, want prefilled err", got)
 	}
 
@@ -48,10 +49,10 @@ func TestFilterInput(t *testing.T) {
 	}
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mdl = nm.(Model)
-	if mdl.tabs[0].(*logs.Model).Filter() != "" {
-		t.Errorf("filter after clear = %q, want empty", mdl.tabs[0].(*logs.Model).Filter())
+	if mdl.tabs[idxLogs].(*logs.Model).Filter() != "" {
+		t.Errorf("filter after clear = %q, want empty", mdl.tabs[idxLogs].(*logs.Model).Filter())
 	}
-	if mdl.tabs[0].(*logs.Model).Filtering() {
+	if mdl.tabs[idxLogs].(*logs.Model).Filtering() {
 		t.Error("filtering should be false after applying")
 	}
 
@@ -59,7 +60,7 @@ func TestFilterInput(t *testing.T) {
 	nm, _ = mdl.Update(keyPress("/"))
 	nm, _ = nm.Update(keyPress("x"))
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	if got := nm.(Model).tabs[0].(*logs.Model).FilterInput(); got != "" {
+	if got := nm.(Model).tabs[idxLogs].(*logs.Model).FilterInput(); got != "" {
 		t.Errorf("filterInput after backspace = %q, want empty", got)
 	}
 
@@ -67,8 +68,8 @@ func TestFilterInput(t *testing.T) {
 	nm, _ = nm.Update(keyPress("z"))
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	mdl = nm.(Model)
-	if mdl.tabs[0].(*logs.Model).Filtering() || mdl.tabs[0].(*logs.Model).Filter() != "" {
-		t.Errorf("after esc: filtering=%v filter=%q (should keep empty)", mdl.tabs[0].(*logs.Model).Filtering(), mdl.tabs[0].(*logs.Model).Filter())
+	if mdl.tabs[idxLogs].(*logs.Model).Filtering() || mdl.tabs[idxLogs].(*logs.Model).Filter() != "" {
+		t.Errorf("after esc: filtering=%v filter=%q (should keep empty)", mdl.tabs[idxLogs].(*logs.Model).Filtering(), mdl.tabs[idxLogs].(*logs.Model).Filter())
 	}
 }
 
@@ -76,7 +77,8 @@ func TestFilterInput(t *testing.T) {
 // content, filtering lines that arrived before the filter was applied.
 func TestFilterAppliesToHistory(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	nm, _ := m.Update(keyPress("4")) // switch to Logs tab
+	nm, _ = nm.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	nm, _ = nm.Update(shared.LogLineMsg{Line: "info: normal line"})
 	nm, _ = nm.Update(shared.LogLineMsg{Line: "error: bad thing"})
 
@@ -88,11 +90,11 @@ func TestFilterAppliesToHistory(t *testing.T) {
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	mdl := nm.(Model)
-	if mdl.tabs[0].(*logs.Model).Filter() != "error" {
-		t.Fatalf("filter = %q, want error", mdl.tabs[0].(*logs.Model).Filter())
+	if mdl.tabs[idxLogs].(*logs.Model).Filter() != "error" {
+		t.Fatalf("filter = %q, want error", mdl.tabs[idxLogs].(*logs.Model).Filter())
 	}
-	if mdl.tabs[0].(*logs.Model).LineCount() != 2 {
-		t.Errorf("history = %d, want 2 (full history retained)", mdl.tabs[0].(*logs.Model).LineCount())
+	if mdl.tabs[idxLogs].(*logs.Model).LineCount() != 2 {
+		t.Errorf("history = %d, want 2 (full history retained)", mdl.tabs[idxLogs].(*logs.Model).LineCount())
 	}
 	if got := mdl.View().Content; strings.Contains(got, "normal line") {
 		t.Errorf("View still shows filtered-out history:\n%s", got)
@@ -103,7 +105,8 @@ func TestFilterAppliesToHistory(t *testing.T) {
 // terminal buffer is not scrolled instead.
 func TestMouseWheelScroll(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	nm, _ := m.Update(keyPress("4")) // switch to Logs tab
+	nm, _ = nm.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	nm, _ = nm.Update(keyPress("f")) // follow off so appends do not re-scroll
 	for i := 0; i < 50; i++ {
 		nm, _ = nm.Update(shared.LogLineMsg{Line: fmt.Sprintf("scroll line %d", i)})
@@ -111,7 +114,7 @@ func TestMouseWheelScroll(t *testing.T) {
 
 	nm, _ = nm.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	mdl := nm.(Model)
-	if got := mdl.tabs[0].(*logs.Model).YOffset(); got <= 0 {
+	if got := mdl.tabs[idxLogs].(*logs.Model).YOffset(); got <= 0 {
 		t.Errorf("wheel down did not scroll (YOffset=%d)", got)
 	}
 }
@@ -119,16 +122,17 @@ func TestMouseWheelScroll(t *testing.T) {
 // TestFollowToggle verifies f flips the follow-at-bottom flag.
 func TestFollowToggle(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	if !m.tabs[0].(*logs.Model).Following() {
+	if !m.tabs[idxLogs].(*logs.Model).Following() {
 		t.Fatal("follow should default to true")
 	}
 
-	nm, _ := m.Update(keyPress("f"))
-	if nm.(Model).tabs[0].(*logs.Model).Following() {
+	nm, _ := m.Update(keyPress("4")) // switch to Logs tab
+	nm, _ = nm.Update(keyPress("f"))
+	if nm.(Model).tabs[idxLogs].(*logs.Model).Following() {
 		t.Error("follow should be false after f")
 	}
 	nm, _ = nm.Update(keyPress("f"))
-	if !nm.(Model).tabs[0].(*logs.Model).Following() {
+	if !nm.(Model).tabs[idxLogs].(*logs.Model).Following() {
 		t.Error("follow should be true after f again")
 	}
 }
@@ -136,11 +140,12 @@ func TestFollowToggle(t *testing.T) {
 // TestFollowIndicator verifies the help line shows the follow state.
 func TestFollowIndicator(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	if got := m.View().Content; !strings.Contains(got, "f:follow(ON)") {
+	nm, _ := m.Update(keyPress("4")) // switch to Logs tab
+	if got := nm.View().Content; !strings.Contains(got, "f:follow(ON)") {
 		t.Errorf("View = %q, want follow(ON)", got)
 	}
 
-	nm, _ := m.Update(keyPress("f"))
+	nm, _ = nm.Update(keyPress("f"))
 	if got := nm.View().Content; !strings.Contains(got, "f:follow(OFF)") {
 		t.Errorf("View = %q, want follow(OFF)", got)
 	}
@@ -150,7 +155,7 @@ func TestFollowIndicator(t *testing.T) {
 // viewport on the Logs and Subscriptions tabs, and the config viewport in the
 // config viewer modal.
 func TestScrollOnEveryTab(t *testing.T) {
-	for _, tab := range []string{"1", "2"} {
+	for _, tab := range []string{"1", "3"} {
 		t.Run("logs tab "+tab, func(t *testing.T) {
 			m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 			nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -162,7 +167,7 @@ func TestScrollOnEveryTab(t *testing.T) {
 
 			nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 			mdl := nm.(Model)
-			if YOffset := mdl.tabs[0].(*logs.Model).YOffset(); YOffset == 0 {
+			if YOffset := mdl.tabs[idxLogs].(*logs.Model).YOffset(); YOffset == 0 {
 				t.Errorf("PgDn on tab %s did not scroll the log viewport (YOffset=0)", tab)
 			}
 		})
@@ -171,7 +176,7 @@ func TestScrollOnEveryTab(t *testing.T) {
 	t.Run("config viewer", func(t *testing.T) {
 		m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 		nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		nm, _ = nm.Update(keyPress("4")) // Config tab
+		nm, _ = nm.Update(keyPress("5")) // Config tab
 		nm, _ = nm.Update(kernel.ConfigLoadedMsg{Mode: kernel.ConfigActive, Content: strings.Repeat("line\n", 50)})
 
 		// Move selection down to the View YAML entry and open the viewer.
@@ -182,7 +187,7 @@ func TestScrollOnEveryTab(t *testing.T) {
 
 		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 		mdl := nm.(Model)
-		if YOffset := mdl.tabs[3].(*kernel.Model).ConfigYOffset(); YOffset == 0 {
+		if YOffset := mdl.tabs[idxKernel].(*kernel.Model).ConfigYOffset(); YOffset == 0 {
 			t.Errorf("PgDn in config viewer did not scroll the config viewport (YOffset=0)")
 		}
 	})
@@ -191,7 +196,8 @@ func TestScrollOnEveryTab(t *testing.T) {
 // TestViewportScroll verifies PgDn is forwarded to the log viewport.
 func TestViewportScroll(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	nm, _ := m.Update(keyPress("4")) // switch to Logs tab
+	nm, _ = nm.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	nm, _ = nm.Update(keyPress("f")) // follow off, inspect the scroll position
 	for i := 0; i < 50; i++ {
 		nm, _ = nm.Update(shared.LogLineMsg{Line: fmt.Sprintf("scroll line %d", i)})
@@ -212,7 +218,8 @@ func TestViewportScroll(t *testing.T) {
 func TestViewLogStream(t *testing.T) {
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	nm, _ := m.Update(keyPress("4")) // switch to Logs tab
+	nm, _ = nm.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	nm, _ = nm.Update(shared.LogLineMsg{Line: "hello kernel"})
 
 	got := shared.ANSIRe.ReplaceAllString(nm.View().Content, "")
