@@ -24,7 +24,7 @@ import (
 )
 
 // webFS holds the dashboard assets bundled at build time. Empty by default —
-// operators either populate internal/static/web/ at build time or set UI_DIST
+// operators either populate internal/server/static/web/ at build time or set UI_DIST
 // at runtime to point at the unpacked tarball.
 //
 //go:embed all:web
@@ -306,7 +306,7 @@ const stubIndexHTML = `<!DOCTYPE html>
 <li>Set <code>UI_DIST=/path/to/unpacked/tarball</code> pointing at the
 <code>compressed-dist.tgz</code> contents from
 <a href="https://github.com/metacubex/metacubexd/releases">metacubexd releases</a>, or</li>
-<li>Rebuild with <code>internal/static/web/</code> populated (go:embed).</li>
+<li>Rebuild with <code>internal/server/static/web/</code> populated (go:embed).</li>
 </ul>
 <p>The control + Clash proxy APIs are still reachable under <code>/api/</code>.</p>
 </body>
