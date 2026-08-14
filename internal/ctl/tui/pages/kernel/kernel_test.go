@@ -57,8 +57,8 @@ func TestTunDefaults(t *testing.T) {
 	if fields["tun-device"] != "Mihomo" {
 		t.Errorf("tun-device = %q, want Mihomo", fields["tun-device"])
 	}
-	if fields["tun-stack"] != "mixed" {
-		t.Errorf("tun-stack = %q, want mixed", fields["tun-stack"])
+	if fields["tun-stack"] != "gvisor" {
+		t.Errorf("tun-stack = %q, want gvisor", fields["tun-stack"])
 	}
 }
 
@@ -88,6 +88,61 @@ func TestEditFieldAcceptsInput(t *testing.T) {
 				t.Errorf("input dropped: got %q, want it to contain 'x'", got)
 			}
 		})
+	}
+}
+
+// TestEnumFieldSelect verifies tun-stack opens an option picker (not the text
+// editor), navigation cycles the highlighted option with wraparound, and the
+// picked value is written back through the tun sub-field without dropping
+// sibling keys.
+func TestEnumFieldSelect(t *testing.T) {
+	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+	m.network = networkSettingsFrom(map[string]any{
+		"tun": map[string]any{"enable": true, "stack": "system"},
+	})
+
+	// tun-stack = networkFields[5]; current value "system" is options[0].
+	m.startEditField(5)
+	if !m.editingEnum {
+		t.Fatal("tun-stack should open the option picker, not the text editor")
+	}
+	if m.editing {
+		t.Error("tun-stack should not open the free-form text editor")
+	}
+	if m.enumSel != 0 {
+		t.Errorf("enumSel = %d, want 0 (current value 'system')", m.enumSel)
+	}
+
+	// right cycles to the next option without closing the picker.
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.enumSel != 1 {
+		t.Errorf("after right: enumSel = %d, want 1", m.enumSel)
+	}
+	if !m.editingEnum {
+		t.Error("picker closed on navigation key")
+	}
+
+	// wraparound: at n=3, two more rights wrap back to index 0.
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.enumSel != 0 {
+		t.Errorf("after wraparound: enumSel = %d, want 0", m.enumSel)
+	}
+
+	// setField rebuilds the tun object with the picked stack, keeping siblings.
+	key, value := m.network.setField(networkFields[5], "gvisor")
+	if key != "tun" {
+		t.Errorf("setField key = %q, want tun", key)
+	}
+	tun, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("setField value = %T, want map[string]any", value)
+	}
+	if tun["stack"] != "gvisor" {
+		t.Errorf("tun.stack = %v, want gvisor", tun["stack"])
+	}
+	if tun["enable"] != true {
+		t.Errorf("setField dropped existing tun.enable: %v", tun["enable"])
 	}
 }
 

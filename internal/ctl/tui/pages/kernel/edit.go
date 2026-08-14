@@ -26,6 +26,20 @@ func (md *editModal) View(w, h int) string {
 	return md.m.editInputView()
 }
 
+// enumModal is the option-picker popup for an enumerated network field.
+type enumModal struct{ m *Model }
+
+// Update implements shared.Modal, driving the picker (←/→ switch, enter
+// saves, esc cancels).
+func (md *enumModal) Update(msg tea.Msg) (shared.Modal, tea.Cmd) {
+	return md, md.m.updateEnumEdit(msg)
+}
+
+// View implements shared.Modal.
+func (md *enumModal) View(w, h int) string {
+	return md.m.enumEditView()
+}
+
 // sectionModal is the section editor popup. While open the config viewer
 // stays visible beneath it (matching the original layout), so its View layers
 // the section form over the viewer modal content.
@@ -46,9 +60,24 @@ func (md *sectionModal) View(w, h int) string {
 	return components.OverlayModal(cfg, sec, unionW, unionH)
 }
 
-// startEditField opens the single-value editor for a network field, prefilled
-// with its current value.
+// startEditField opens the editor for a network field. Enumerated fields
+// (with non-empty options) open an option picker; the rest open the
+// single-value text editor, prefilled with the current value.
 func (m *Model) startEditField(i int) (shared.Tab, tea.Cmd, bool) {
+	f := networkFields[i]
+	if len(f.options) > 0 {
+		m.editingEnum = true
+		m.editField = i
+		cur := m.network.valueOf(f)
+		m.enumSel = 0
+		for j, o := range f.options {
+			if o == cur {
+				m.enumSel = j
+				break
+			}
+		}
+		return m, nil, true
+	}
 	m.editing = true
 	m.editField = i
 	in := textinput.New()
@@ -81,6 +110,33 @@ func (m *Model) updateEdit(msg tea.Msg) tea.Cmd {
 			var cmd tea.Cmd
 			m.editInput, cmd = m.editInput.Update(msg)
 			return cmd
+		}
+	}
+	return nil
+}
+
+// updateEnumEdit drives the option-picker popup for an enumerated network
+// field: ←/→ (and ↑/↓, vim hjkl) cycle the selection, enter saves via
+// PutSection, esc cancels.
+func (m *Model) updateEnumEdit(msg tea.Msg) tea.Cmd {
+	f := networkFields[m.editField]
+	opts := f.options
+	n := len(opts)
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "esc":
+			m.editingEnum = false
+			return nil
+		case "enter":
+			v := opts[m.enumSel]
+			m.editingEnum = false
+			key, value := m.network.setField(f, v)
+			return PutSection(m.client, key, value)
+		case "up", "left", "k", "h":
+			m.enumSel = (m.enumSel + n - 1) % n
+		case "down", "right", "j", "l":
+			m.enumSel = (m.enumSel + 1) % n
 		}
 	}
 	return nil
@@ -144,6 +200,31 @@ func (m *Model) editInputView() string {
 	sep := strings.Repeat("─", cw)
 	footer := lipgloss.NewStyle().Width(cw).Align(lipgloss.Center).Render("enter:save  esc:cancel")
 	inner := strings.Join([]string{header, sep, m.editInput.View(), sep, footer}, "\n")
+	return components.BorderedModal(inner, cw)
+}
+
+// enumEditView renders the option-picker popup for an enumerated network
+// field: a header, the options with the highlighted one marked, and a
+// key-hint footer.
+func (m *Model) enumEditView() string {
+	f := networkFields[m.editField]
+	const cw = 26
+	header := lipgloss.NewStyle().Bold(true).Width(cw).Align(lipgloss.Center).Render("Edit " + f.label)
+	sep := strings.Repeat("─", cw)
+	rows := make([]string, 0, len(f.options))
+	for i, o := range f.options {
+		marker := "  "
+		style := lipgloss.NewStyle().Width(cw)
+		if i == m.enumSel {
+			marker = "▶ "
+			style = shared.SelectedStyle.Width(cw)
+		}
+		rows = append(rows, style.Render(marker+o))
+	}
+	footer := lipgloss.NewStyle().Width(cw).Align(lipgloss.Center).Render("↑↓:switch  enter:save  esc:cancel")
+	parts := append([]string{header, sep}, rows...)
+	parts = append(parts, sep, footer)
+	inner := strings.Join(parts, "\n")
 	return components.BorderedModal(inner, cw)
 }
 

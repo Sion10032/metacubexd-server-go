@@ -31,6 +31,8 @@ type Model struct {
 	editing        bool
 	editField      int
 	editInput      textinput.Model
+	editingEnum    bool // option-picker popup open for an enum network field
+	enumSel        int  // highlighted index into networkFields[editField].options
 	editingSection bool
 	sectionForm    components.Form
 
@@ -67,6 +69,8 @@ func (m *Model) Overlay() shared.Modal {
 	switch {
 	case m.editing:
 		return &editModal{m: m}
+	case m.editingEnum:
+		return &enumModal{m: m}
 	case m.editingSection:
 		return &sectionModal{m: m}
 	case m.viewingConfig:
@@ -124,6 +128,9 @@ func (m *Model) updateKey(msg tea.Msg) (shared.Tab, tea.Cmd, bool) {
 	// Overlay states swallow all keys — match the old root Overlay() check.
 	if m.editing {
 		return m, m.updateEdit(msg), true
+	}
+	if m.editingEnum {
+		return m, m.updateEnumEdit(msg), true
 	}
 	if m.editingSection {
 		return m, m.updateSectionForm(msg), true
