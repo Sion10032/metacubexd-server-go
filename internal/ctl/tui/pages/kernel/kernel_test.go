@@ -62,6 +62,35 @@ func TestTunDefaults(t *testing.T) {
 	}
 }
 
+// TestEditFieldAcceptsInput verifies the network-field editor receives typed
+// characters. textinput.Model is a value type, so it must be stored AFTER
+// Focus() flips its focus flag — otherwise Update() drops every key at the
+// `if !m.focus { return }` guard.
+func TestEditFieldAcceptsInput(t *testing.T) {
+	cases := []struct {
+		name   string
+		idx    int // index into networkFields
+		values map[string]any
+	}{
+		{"mixed-port", 0, map[string]any{"mixed-port": float64(7890)}},
+		{"tun-device", 4, map[string]any{"tun": map[string]any{"enable": true, "device": "utun8"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
+			m.network = networkSettingsFrom(tc.values)
+			m.startEditField(tc.idx)
+			if !m.editInput.Focused() {
+				t.Fatal("editor not focused after startEditField")
+			}
+			m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+			if got := m.editInput.Value(); !strings.Contains(got, "x") {
+				t.Errorf("input dropped: got %q, want it to contain 'x'", got)
+			}
+		})
+	}
+}
+
 // TestViewMenu verifies the Config tab body lists every operation, the
 // network fields and the raw YAML viewer, with the selected entry highlighted.
 func TestViewMenu(t *testing.T) {
