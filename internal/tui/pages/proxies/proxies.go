@@ -20,6 +20,7 @@ type Model struct {
 	groups   []string          // filtered proxy-groups (excluding GLOBAL)
 	expanded map[string]bool   // group name -> expanded
 	cursor   int               // cursor in visible rows
+	scrollTop int              // first visible row index for scrolling
 	width    int
 	height   int
 	delays   map[string]int    // node name -> delay in ms (0 = timeout)
@@ -147,10 +148,17 @@ func (m *Model) View() string {
 	b.WriteString(strings.Repeat("─", m.width))
 	b.WriteString("\n")
 
-	// Build visible rows
+	// Build visible rows and apply scrolling
 	rows := m.buildRows()
-	for i, row := range rows {
-		isSelected := i == m.cursor
+	vh := m.visibleHeight()
+	end := m.scrollTop + vh
+	if end > len(rows) {
+		end = len(rows)
+	}
+	visible := rows[m.scrollTop:end]
+	for i, row := range visible {
+		globalIdx := m.scrollTop + i
+		isSelected := globalIdx == m.cursor
 
 		var line string
 		if row.isGroup {
@@ -285,13 +293,16 @@ func (m *Model) rebuildGroups() {
 	if m.cursor >= len(rows) {
 		m.cursor = 0
 	}
+	m.adjustScroll()
 }
 
-// moveCursor moves the cursor by delta, clamping to valid range.
+// moveCursor moves the cursor by delta, clamping to valid range
+// and adjusting scrollTop to keep the cursor visible.
 func (m *Model) moveCursor(delta int) {
 	rows := m.buildRows()
 	if len(rows) == 0 {
 		m.cursor = 0
+		m.scrollTop = 0
 		return
 	}
 	m.cursor += delta
@@ -300,6 +311,46 @@ func (m *Model) moveCursor(delta int) {
 	}
 	if m.cursor >= len(rows) {
 		m.cursor = len(rows) - 1
+	}
+	// Adjust scrollTop to keep cursor visible
+	m.adjustScroll()
+}
+
+// visibleHeight returns the number of rows visible below the header.
+func (m *Model) visibleHeight() int {
+	// 2 lines for mode + separator
+	h := m.height - 2
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+// adjustScroll adjusts scrollTop so the cursor is within the visible window.
+func (m *Model) adjustScroll() {
+	vh := m.visibleHeight()
+	rows := m.buildRows()
+	total := len(rows)
+	if total == 0 {
+		m.scrollTop = 0
+		return
+	}
+	// Ensure scrollTop is in valid range
+	if m.scrollTop < 0 {
+		m.scrollTop = 0
+	}
+	if m.scrollTop+vh > total {
+		m.scrollTop = total - vh
+	}
+	if m.scrollTop < 0 {
+		m.scrollTop = 0
+	}
+	// Ensure cursor is within [scrollTop, scrollTop+vh)
+	if m.cursor < m.scrollTop {
+		m.scrollTop = m.cursor
+	}
+	if m.cursor >= m.scrollTop+vh {
+		m.scrollTop = m.cursor - vh + 1
 	}
 }
 
@@ -313,6 +364,7 @@ func (m *Model) expandOrSwitch() tea.Cmd {
 	if row.isGroup {
 		// Toggle expansion
 		m.expanded[row.group] = !m.expanded[row.group]
+		m.adjustScroll()
 		return nil
 	}
 	// Switch to member
@@ -339,6 +391,7 @@ func (m *Model) collapseCurrent() {
 			}
 		}
 	}
+	m.adjustScroll()
 }
 
 // toggleMode cycles through rule -> global -> direct -> rule.

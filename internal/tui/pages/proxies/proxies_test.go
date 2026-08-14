@@ -445,3 +445,87 @@ func TestGroupDelayDKeyMember(t *testing.T) {
 		t.Error("testGroupDelay should return nil on member row")
 	}
 }
+
+// TestScrolling verifies that the list scrolls when the cursor moves beyond visible area.
+func TestScrolling(t *testing.T) {
+	// Create a group with many members to exceed visible area
+	members := make([]string, 20)
+	for i := range members {
+		members[i] = fmt.Sprintf("node%d", i)
+	}
+	proxies := map[string]client.Proxy{
+		"GROUP": {Name: "GROUP", Type: "Selector", Now: "node0", All: members},
+	}
+	for _, name := range members {
+		proxies[name] = client.Proxy{Name: name, Type: "ss"}
+	}
+	resp := client.ProxiesResponse{Proxies: proxies, Order: []string{"GROUP"}}
+	m := New(nil)
+	m.SetSize(80, 10) // 10 lines total, 8 visible rows (10 - 2 header)
+	tab, _, _ := m.Update(ProxiesLoadedMsg{Resp: resp})
+	m = tab.(*Model)
+
+	// Expand group
+	m.cursor = 0
+	_ = m.expandOrSwitch()
+
+	// Move cursor down past visible area
+	for i := 0; i < 10; i++ {
+		m.moveCursor(1)
+	}
+
+	// Cursor should be at 10, scrollTop should have adjusted
+	if m.cursor != 10 {
+		t.Errorf("cursor = %d, want 10", m.cursor)
+	}
+	if m.scrollTop == 0 {
+		t.Error("scrollTop should be > 0 when cursor is below visible area")
+	}
+	// Cursor should be within visible window
+	vh := m.visibleHeight()
+	if m.cursor < m.scrollTop || m.cursor >= m.scrollTop+vh {
+		t.Errorf("cursor %d not in visible window [%d, %d)", m.cursor, m.scrollTop, m.scrollTop+vh)
+	}
+}
+
+// TestCollapseWhenOffscreen verifies that collapsing works even when cursor is off-screen.
+func TestCollapseWhenOffscreen(t *testing.T) {
+	members := make([]string, 20)
+	for i := range members {
+		members[i] = fmt.Sprintf("node%d", i)
+	}
+	proxies := map[string]client.Proxy{
+		"GROUP": {Name: "GROUP", Type: "Selector", Now: "node0", All: members},
+	}
+	for _, name := range members {
+		proxies[name] = client.Proxy{Name: name, Type: "ss"}
+	}
+	resp := client.ProxiesResponse{Proxies: proxies, Order: []string{"GROUP"}}
+	m := New(nil)
+	m.SetSize(80, 10)
+	tab, _, _ := m.Update(ProxiesLoadedMsg{Resp: resp})
+	m = tab.(*Model)
+
+	// Expand group
+	m.cursor = 0
+	_ = m.expandOrSwitch()
+	if !m.expanded["GROUP"] {
+		t.Fatal("GROUP should be expanded")
+	}
+
+	// Move to a member row far down
+	for i := 0; i < 15; i++ {
+		m.moveCursor(1)
+	}
+
+	// Collapse via left key
+	m.collapseCurrent()
+	if m.expanded["GROUP"] {
+		t.Error("GROUP should be collapsed after pressing left on member")
+	}
+	// Cursor should be on the group row
+	rows := m.buildRows()
+	if m.cursor >= len(rows) || !rows[m.cursor].isGroup {
+		t.Errorf("cursor should be on group row after collapse, cursor=%d", m.cursor)
+	}
+}
