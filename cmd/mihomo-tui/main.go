@@ -8,8 +8,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"metacubexd-server-go/internal/ctl"
-	"metacubexd-server-go/internal/ctl/tui"
+	"metacubexd-server-go/internal/tui/client"
+	"metacubexd-server-go/internal/tui"
 )
 
 // defaultEndpoint mirrors the server's CONTROL_PORT default (8080) so a local
@@ -30,7 +30,7 @@ func main() {
 	)
 	flag.Parse()
 
-	client := ctl.NewClient(*endpoint, *token, *insecure)
+	client := client.NewClient(*endpoint, *token, *insecure)
 
 	// Probe the control API before entering the TUI so a wrong endpoint or
 	// missing auth fails fast with a clear message instead of a blank screen.

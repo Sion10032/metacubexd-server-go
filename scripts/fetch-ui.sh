@@ -2,7 +2,7 @@
 # fetch-ui.sh — Download metacubexd dashboard assets for embedding.
 #
 # Reads METACUBEXD_VERSION from versions.env, fetches the release tarball,
-# and extracts it into internal/static/web/ so go:embed bundles it.
+# and extracts it into internal/server/static/web/ so go:embed bundles it.
 #
 # Usage: bash scripts/fetch-ui.sh
 
@@ -14,7 +14,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=../versions.env
 source "$ROOT_DIR/versions.env"
 
-WEB_DIR="$ROOT_DIR/internal/static/web"
+WEB_DIR="$ROOT_DIR/internal/server/static/web"
 rm -rf "$WEB_DIR"
 mkdir -p "$WEB_DIR"
 
