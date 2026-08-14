@@ -25,16 +25,17 @@ func FetchConfig(c *ctl.Client, mode int) tea.Cmd {
 	}
 }
 
-// FetchNetworkSettings loads the editable network fields from the runtime
-// config — the file mihomo actually runs — so injected and merged values (like
-// tun from a merge overlay) are included.
+// FetchNetworkSettings loads the editable network fields from mihomo's live
+// /configs endpoint (GET /api/clash/configs) — the values the kernel
+// actually applies at runtime — so tun and other injected/merged/runtime
+// values are reflected even when they differ from the on-disk active config.
 func FetchNetworkSettings(c *ctl.Client) tea.Cmd {
 	return func() tea.Msg {
-		content, err := c.GetRuntimeConfig()
+		values, err := c.GetConfigs()
 		if err != nil {
 			return NetworkSettingsMsg{Err: err}
 		}
-		return NetworkSettingsMsg{Settings: parseNetworkSettings(content)}
+		return NetworkSettingsMsg{Settings: networkSettingsFrom(values)}
 	}
 }
 

@@ -12,11 +12,21 @@ import (
 	"metacubexd-server-go/internal/ctl/tui/shared"
 )
 
-// TestParseNetworkSettings verifies the runtime YAML is parsed into the
-// editable network fields, including the nested tun object.
-func TestParseNetworkSettings(t *testing.T) {
-	content := "mixed-port: 7890\nport: 7890\nsocks-port: 7891\ntun:\n  enable: true\n  device: tun0\n  stack: system\n"
-	ns := parseNetworkSettings(content)
+// TestNetworkSettingsFrom verifies mihomo's live /configs response is
+// projected into the editable network fields, including the nested tun
+// object.
+func TestNetworkSettingsFrom(t *testing.T) {
+	values := map[string]any{
+		"mixed-port": float64(7890),
+		"port":       float64(7890),
+		"socks-port": float64(7891),
+		"tun": map[string]any{
+			"enable": true,
+			"device": "tun0",
+			"stack":  "system",
+		},
+	}
+	ns := networkSettingsFrom(values)
 	if !ns.Loaded {
 		t.Fatal("loaded should be true")
 	}
@@ -36,7 +46,7 @@ func TestParseNetworkSettings(t *testing.T) {
 // TestTunDefaults verifies tun sub-fields absent from the config fall back to
 // mihomo's defaults (device=Mihomo, stack=mixed).
 func TestTunDefaults(t *testing.T) {
-	ns := parseNetworkSettings("tun:\n  enable: false\n")
+	ns := networkSettingsFrom(map[string]any{"tun": map[string]any{"enable": false}})
 	fields := map[string]string{}
 	for _, f := range networkFields {
 		fields[f.label] = ns.valueOf(f)

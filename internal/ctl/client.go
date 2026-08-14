@@ -375,6 +375,18 @@ type ClashConfig struct {
 	Mode string `json:"mode"` // rule / global / direct
 }
 
+// GetConfigs fetches the full running config from mihomo's /configs endpoint
+// — the values the kernel actually applies at runtime, including tun. Unlike
+// GET /api/control/config/runtime (which reads the on-disk active config),
+// this reflects injected, merged and runtime-patched values.
+func (c *Client) GetConfigs() (map[string]any, error) {
+	var v map[string]any
+	if err := c.doJSON(http.MethodGet, "/api/clash/configs", nil, &v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
 // ConnectionMetadata is the peer metadata for a single connection.
 type ConnectionMetadata struct {
 	Network         string `json:"network"`          // tcp / udp
