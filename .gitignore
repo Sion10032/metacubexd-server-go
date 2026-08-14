@@ -39,5 +39,5 @@ result
 
 # Project-specific
 /data
-/internal/static/web/*
-!/internal/static/web/.gitkeep
+/internal/server/static/web/*
+!/internal/server/static/web/.gitkeep
