@@ -14,23 +14,24 @@ type NetworkSettings struct {
 
 // networkField describes one editable network entry.
 type networkField struct {
-	label string
-	key   string // top-level config key
-	sub   string // tun sub-key ("" for top-level scalars)
+	label   string
+	key     string   // top-level config key
+	sub     string   // tun sub-key ("" for top-level scalars)
+	options []string // enumerated values; empty = free-form text input
 }
 
 // networkFields lists the editable network entries in display order.
 var networkFields = []networkField{
-	{"mixed-port", "mixed-port", ""},
-	{"http-port", "port", ""},
-	{"socks-port", "socks-port", ""},
-	{"tun-enable", "tun", "enable"},
-	{"tun-device", "tun", "device"},
-	{"tun-stack", "tun", "stack"},
+	{"mixed-port", "mixed-port", "", nil},
+	{"http-port", "port", "", nil},
+	{"socks-port", "socks-port", "", nil},
+	{"tun-enable", "tun", "enable", nil},
+	{"tun-device", "tun", "device", nil},
+	{"tun-stack", "tun", "stack", []string{"system", "gvisor", "mixed"}},
 }
 
 // valueOf returns the current value of a network field as a string. Absent tun
-// sub-fields fall back to mihomo's defaults (stack=mixed, device=Mihomo).
+// sub-fields fall back to mihomo's defaults (stack=gvisor, device=Mihomo).
 func (ns NetworkSettings) valueOf(f networkField) string {
 	if f.sub == "" {
 		return fmtValue(ns.Values[f.key])
@@ -42,7 +43,7 @@ func (ns NetworkSettings) valueOf(f networkField) string {
 	}
 	switch f.sub {
 	case "stack":
-		return "mixed"
+		return "gvisor" // mihomo's default tun stack
 	case "device":
 		return "Mihomo"
 	}
