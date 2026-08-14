@@ -22,6 +22,8 @@ type Model struct {
 	cursor   int               // cursor in visible rows
 	width    int
 	height   int
+	delays   map[string]int    // node name -> delay in ms (0 = timeout)
+	testing  map[string]bool   // group name -> testing in progress
 }
 
 // New returns the Proxy tab.
@@ -29,6 +31,8 @@ func New(client *client.Client) *Model {
 	return &Model{
 		client:   client,
 		expanded: make(map[string]bool),
+		delays:   make(map[string]int),
+		testing:  make(map[string]bool),
 	}
 }
 
@@ -37,11 +41,18 @@ func (m *Model) Title() string { return "Proxy" }
 
 // Help implements shared.Tab.
 func (m *Model) Help() string {
-	return "1-5:tabs  m:mode  ↑↓:move  →/enter:expand or switch  ←:collapse  r:refresh  q:quit"
+	return "1-5:tabs  m:mode  ↑↓:move  →/enter:expand or switch  ←:collapse  r:refresh  d:delay  q:quit"
 }
 
-// Busy implements shared.Tab; no in-flight operations yet.
-func (m *Model) Busy() bool { return false }
+// Busy implements shared.Tab; returns true when a group delay test is in progress.
+func (m *Model) Busy() bool {
+	for _, v := range m.testing {
+		if v {
+			return true
+		}
+	}
+	return false
+}
 
 // Overlay implements shared.Tab; no popups.
 func (m *Model) Overlay() shared.Modal { return nil }
@@ -73,6 +84,8 @@ func (m *Model) Update(msg tea.Msg) (shared.Tab, tea.Cmd, bool) {
 			return m, nil, true
 		case "r":
 			return m, m.refresh(), true
+		case "d":
+			return m, m.testGroupDelay(), true
 		}
 	case ProxiesLoadedMsg:
 		if msg.Err != nil {
@@ -81,6 +94,13 @@ func (m *Model) Update(msg tea.Msg) (shared.Tab, tea.Cmd, bool) {
 		}
 		m.resp = msg.Resp
 		m.rebuildGroups()
+		// Extract delay history for each node
+		for name, proxy := range m.resp.Proxies {
+			if len(proxy.History) > 0 {
+				last := proxy.History[len(proxy.History)-1]
+				m.delays[name] = last.Delay
+			}
+		}
 		return m, nil, true
 	case ModeLoadedMsg:
 		if msg.Err != nil {
@@ -95,6 +115,18 @@ func (m *Model) Update(msg tea.Msg) (shared.Tab, tea.Cmd, bool) {
 	case ModeOpMsg:
 		// After mode switch, refresh mode
 		return m, FetchMode(m.client), true
+	case GroupDelayMsg:
+		// Clear testing flag for this group (even on error)
+		m.testing[msg.Group] = false
+		if msg.Err != nil {
+			// TODO: surface error to status line
+			return m, nil, true
+		}
+		// Merge delays into m.delays
+		for name, delay := range msg.Delays {
+			m.delays[name] = delay
+		}
+		return m, nil, true
 	}
 	return m, nil, false
 }
@@ -133,6 +165,9 @@ func (m *Model) View() string {
 				now = " [" + row.nowName + "]"
 			}
 			line = fmt.Sprintf("%s %s (%s)%s", expandIcon, row.name, groupType, now)
+			if m.testing[row.group] {
+				line += " " + shared.SpinnerStyle.Render("testing…")
+			}
 		} else {
 			// Member line
 			indicator := "○"
@@ -140,6 +175,23 @@ func (m *Model) View() string {
 				indicator = "●"
 			}
 			line = fmt.Sprintf("   %s %s %s", indicator, row.name, row.typ)
+			// Append delay information
+			if m.testing[row.group] {
+				line += " " + shared.DelayNoneStyle.Render("-")
+			} else if delay, ok := m.delays[row.member]; ok {
+				var delayStr string
+				var delayStyle lipgloss.Style
+				if delay == 0 {
+					delayStr = "timeout"
+					delayStyle = shared.DelayBadStyle
+				} else {
+					delayStr = fmt.Sprintf("%dms", delay)
+					delayStyle = shared.DelayStyle(delay)
+				}
+				line += " " + delayStyle.Render(delayStr)
+			} else {
+				line += " " + shared.DelayNoneStyle.Render("--")
+			}
 		}
 		if isSelected {
 			line = shared.SelectedStyle.Render(line)
@@ -328,4 +380,23 @@ func (m *Model) Expanded() map[string]bool {
 // Cursor returns the cursor position (for testing).
 func (m *Model) Cursor() int {
 	return m.cursor
+}
+
+// testGroupDelay returns a command that tests the delay of the group at the current cursor position.
+// If the cursor is not on a group row or the group is already being tested, it returns nil.
+func (m *Model) testGroupDelay() tea.Cmd {
+	rows := m.buildRows()
+	if m.cursor >= len(rows) {
+		return nil
+	}
+	row := rows[m.cursor]
+	if !row.isGroup {
+		return nil
+	}
+	group := row.group
+	if m.testing[group] {
+		return nil
+	}
+	m.testing[group] = true
+	return GroupDelayCmd(m.client, group)
 }

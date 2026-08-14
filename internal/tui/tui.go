@@ -107,7 +107,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateStatus(msg)
 	case profiles.ProfilesLoadedMsg, profiles.ProfileOpMsg:
 		return m.updateProfilesMsg(msg)
-	case proxies.ProxiesLoadedMsg, proxies.ProxyOpMsg, proxies.ModeLoadedMsg, proxies.ModeOpMsg:
+	case proxies.ProxiesLoadedMsg, proxies.ProxyOpMsg, proxies.ModeLoadedMsg, proxies.ModeOpMsg, proxies.GroupDelayMsg:
 		return m.updateProxiesMsg(msg)
 	case kernel.ConfigLoadedMsg, kernel.NetworkSettingsMsg, kernel.SectionEditMsg:
 		return m.updateKernelMsg(msg)

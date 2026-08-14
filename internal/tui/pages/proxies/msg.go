@@ -23,3 +23,10 @@ type ModeLoadedMsg struct {
 type ModeOpMsg struct {
 	Err error
 }
+
+// GroupDelayMsg is sent when a group delay test completes.
+type GroupDelayMsg struct {
+	Group  string
+	Delays map[string]int
+	Err    error
+}

@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -307,10 +308,17 @@ func (c *Client) postKernel(path string) (api.KernelState, error) {
 
 // Proxy describes a single proxy entry in mihomo's /proxies response.
 type Proxy struct {
-	Name string   `json:"name"`
-	Type string   `json:"type"`          // Selector / URLTest / Fallback / Direct / Reject / ...
-	Now  string   `json:"now,omitempty"` // Current node for groups
-	All  []string `json:"all,omitempty"` // Member names for groups
+	Name    string         `json:"name"`
+	Type    string         `json:"type"`          // Selector / URLTest / Fallback / Direct / Reject / ...
+	Now     string         `json:"now,omitempty"` // Current node for groups
+	All     []string       `json:"all,omitempty"` // Member names for groups
+	History []DelayHistory `json:"history,omitempty"`
+}
+
+// DelayHistory represents a single delay measurement entry.
+type DelayHistory struct {
+	Time  string `json:"time"`
+	Delay int    `json:"delay"` // 0 indicates timeout
 }
 
 // ProxiesResponse is the response from GET /api/clash/proxies.
@@ -444,6 +452,20 @@ func (c *Client) GetMode() (string, error) {
 		return "", err
 	}
 	return cfg.Mode, nil
+}
+
+// GetGroupDelay tests the delay of all members in a group and returns a map
+// of node name to delay in milliseconds. A delay of 0 indicates timeout.
+func (c *Client) GetGroupDelay(group string, timeout int, testURL string) (map[string]int, error) {
+	query := url.Values{}
+	query.Set("timeout", fmt.Sprintf("%d", timeout))
+	query.Set("url", testURL)
+	path := fmt.Sprintf("/api/clash/group/%s/delay?%s", url.PathEscape(group), query.Encode())
+	var resp map[string]int
+	if err := c.doJSON(http.MethodGet, path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // SetMode switches the mihomo mode (rule/global/direct).

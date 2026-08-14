@@ -38,6 +38,15 @@ var (
 
 	// ModalBackground is the opaque backdrop of modal popups (config viewer).
 	ModalBackground = lipgloss.Color("232")
+
+	// DelayGoodStyle colors a good delay (<200ms).
+	DelayGoodStyle lipgloss.Style
+	// DelayMidStyle colors a medium delay (200-499ms).
+	DelayMidStyle lipgloss.Style
+	// DelayBadStyle colors a bad delay (>=500ms or timeout).
+	DelayBadStyle lipgloss.Style
+	// DelayNoneStyle colors a node with no delay data.
+	DelayNoneStyle lipgloss.Style
 )
 
 // SetTheme rebuilds every color style for a dark (true) or light (false)
@@ -53,6 +62,10 @@ func SetTheme(dark bool) {
 	TabActiveStyle = lipgloss.NewStyle().Bold(true).Foreground(ld(lipgloss.Color("4"), lipgloss.Color("12")))
 	SelectedStyle = lipgloss.NewStyle().Bold(true).Foreground(ld(lipgloss.Color("4"), lipgloss.Color("12")))
 	SpinnerStyle = lipgloss.NewStyle().Foreground(ld(lipgloss.Color("3"), lipgloss.Color("11")))
+	DelayGoodStyle = lipgloss.NewStyle().Foreground(ld(lipgloss.Color("2"), lipgloss.Color("10")))
+	DelayMidStyle = lipgloss.NewStyle().Foreground(ld(lipgloss.Color("3"), lipgloss.Color("11")))
+	DelayBadStyle = lipgloss.NewStyle().Foreground(ld(lipgloss.Color("1"), lipgloss.Color("9")))
+	DelayNoneStyle = lipgloss.NewStyle().Foreground(ld(lipgloss.Color("8"), lipgloss.Color("7")))
 	if dark {
 		ModalBackground = lipgloss.Color("232")
 	} else {
@@ -81,5 +94,23 @@ func StatusStyle(s api.KernelStatus) lipgloss.Style {
 		return StatusBusyStyle
 	default:
 		return StatusStoppedStyle
+	}
+}
+
+// DelayStyle returns the color style for a given delay in milliseconds.
+// A delay of 0 indicates timeout. A delay of -1 or any negative value
+// indicates no data (not tested).
+func DelayStyle(ms int) lipgloss.Style {
+	switch {
+	case ms < 0:
+		return DelayNoneStyle
+	case ms == 0:
+		return DelayBadStyle
+	case ms < 200:
+		return DelayGoodStyle
+	case ms < 500:
+		return DelayMidStyle
+	default:
+		return DelayBadStyle
 	}
 }

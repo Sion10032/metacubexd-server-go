@@ -1,6 +1,7 @@
 package proxies
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -210,5 +211,237 @@ func TestProxiesEmpty(t *testing.T) {
 	// Should contain mode line
 	if !strings.Contains(view, "mode:") {
 		t.Errorf("view missing mode line:\n%s", view)
+	}
+}
+
+// TestHistoryParsedIntoDelays verifies that proxy history is extracted into delays map.
+func TestHistoryParsedIntoDelays(t *testing.T) {
+	resp := client.ProxiesResponse{
+		Proxies: map[string]client.Proxy{
+			"香港": {
+				Name:    "香港",
+				Type:    "ss",
+				History: []client.DelayHistory{{Time: "2024-01-01T00:00:00Z", Delay: 150}},
+			},
+			"日本": {
+				Name:    "日本",
+				Type:    "vmess",
+				History: []client.DelayHistory{{Time: "2024-01-01T00:00:00Z", Delay: 0}},
+			},
+			"美国": {
+				Name:    "美国",
+				Type:    "trojan",
+				History: nil,
+			},
+		},
+		Order: []string{"香港", "日本", "美国"},
+	}
+	msg := ProxiesLoadedMsg{Resp: resp}
+	m := New(nil)
+	m.SetSize(80, 20)
+	tab, _, _ := m.Update(msg)
+	m = tab.(*Model)
+
+	if d, ok := m.delays["香港"]; !ok || d != 150 {
+		t.Errorf("delays[香港] = %d, want 150", d)
+	}
+	if d, ok := m.delays["日本"]; !ok || d != 0 {
+		t.Errorf("delays[日本] = %d, want 0", d)
+	}
+	if _, ok := m.delays["美国"]; ok {
+		t.Error("delays[美国] should not exist")
+	}
+}
+
+// TestGroupDelayMsgMerge verifies GroupDelayMsg merges delays and clears testing.
+func TestGroupDelayMsgMerge(t *testing.T) {
+	m := New(nil)
+	m.SetSize(80, 20)
+	m.testing["🚀节点选择"] = true
+	m.delays["香港"] = 100
+
+	delays := map[string]int{"香港": 200, "日本": 300}
+	msg := GroupDelayMsg{Group: "🚀节点选择", Delays: delays}
+	tab, _, _ := m.Update(msg)
+	m = tab.(*Model)
+
+	if m.testing["🚀节点选择"] {
+		t.Error("testing flag should be cleared")
+	}
+	if d := m.delays["香港"]; d != 200 {
+		t.Errorf("delays[香港] = %d, want 200", d)
+	}
+	if d := m.delays["日本"]; d != 300 {
+		t.Errorf("delays[日本] = %d, want 300", d)
+	}
+}
+
+// TestGroupDelayMsgError verifies GroupDelayMsg error clears testing.
+func TestGroupDelayMsgError(t *testing.T) {
+	m := New(nil)
+	m.SetSize(80, 20)
+	m.testing["🚀节点选择"] = true
+
+	msg := GroupDelayMsg{Group: "🚀节点选择", Err: fmt.Errorf("network error")}
+	tab, _, _ := m.Update(msg)
+	m = tab.(*Model)
+
+	if m.testing["🚀节点选择"] {
+		t.Error("testing flag should be cleared on error")
+	}
+}
+
+// TestDelayRender verifies delay rendering in the view.
+func TestDelayRender(t *testing.T) {
+	resp := client.ProxiesResponse{
+		Proxies: map[string]client.Proxy{
+			"GROUP": {Name: "GROUP", Type: "Selector", Now: "香港", All: []string{"香港", "日本", "美国"}},
+			"香港": {
+				Name:    "香港",
+				Type:    "ss",
+				History: []client.DelayHistory{{Time: "2024-01-01T00:00:00Z", Delay: 150}},
+			},
+			"日本": {
+				Name:    "日本",
+				Type:    "vmess",
+				History: []client.DelayHistory{{Time: "2024-01-01T00:00:00Z", Delay: 0}},
+			},
+			"美国": {
+				Name:    "美国",
+				Type:    "trojan",
+				History: nil,
+			},
+		},
+		Order: []string{"GROUP"},
+	}
+	msg := ProxiesLoadedMsg{Resp: resp}
+	m := New(nil)
+	m.SetSize(80, 20)
+	tab, _, _ := m.Update(msg)
+	m = tab.(*Model)
+
+	m.cursor = 0
+	_ = m.expandOrSwitch()
+
+	view := m.View()
+	if !strings.Contains(view, "150ms") {
+		t.Errorf("view missing 150ms:\n%s", view)
+	}
+	if !strings.Contains(view, "timeout") {
+		t.Errorf("view missing timeout:\n%s", view)
+	}
+	if !strings.Contains(view, "--") {
+		t.Errorf("view missing --:\n%s", view)
+	}
+}
+
+// TestGroupDelayTestingRender verifies testing… is shown during delay test
+// and members show "-" instead of stale delay values.
+func TestGroupDelayTestingRender(t *testing.T) {
+	resp := client.ProxiesResponse{
+		Proxies: map[string]client.Proxy{
+			"GROUP": {Name: "GROUP", Type: "Selector", Now: "香港", All: []string{"香港", "日本"}},
+		},
+		Order: []string{"GROUP"},
+	}
+	msg := ProxiesLoadedMsg{Resp: resp}
+	m := New(nil)
+	m.SetSize(80, 20)
+	tab, _, _ := m.Update(msg)
+	m = tab.(*Model)
+
+	// Pre-populate stale delays
+	m.delays["香港"] = 100
+	m.delays["日本"] = 200
+
+	// Expand group and start testing
+	m.cursor = 0
+	_ = m.expandOrSwitch()
+	m.testing["GROUP"] = true
+
+	view := m.View()
+	if !strings.Contains(view, "testing…") {
+		t.Errorf("view missing testing…:\n%s", view)
+	}
+	// Members should show "-" during testing, not stale delays
+	if strings.Contains(view, "100ms") {
+		t.Errorf("view should not show stale delay 100ms during testing:\n%s", view)
+	}
+	if strings.Contains(view, "200ms") {
+		t.Errorf("view should not show stale delay 200ms during testing:\n%s", view)
+	}
+}
+
+// TestGroupDelayBusy verifies Busy returns true during delay test.
+func TestGroupDelayBusy(t *testing.T) {
+	m := New(nil)
+	if m.Busy() {
+		t.Error("Busy should be false initially")
+	}
+	m.testing["GROUP"] = true
+	if !m.Busy() {
+		t.Error("Busy should be true during testing")
+	}
+	m.testing["GROUP"] = false
+	if m.Busy() {
+		t.Error("Busy should be false after testing")
+	}
+}
+
+// TestGroupDelayDKey verifies pressing 'd' triggers delay test.
+func TestGroupDelayDKey(t *testing.T) {
+	m := New(nil)
+	m.SetSize(80, 20)
+	cmd := m.testGroupDelay()
+	if cmd != nil {
+		t.Error("testGroupDelay should return nil when no groups")
+	}
+
+	resp := client.ProxiesResponse{
+		Proxies: map[string]client.Proxy{
+			"GROUP": {Name: "GROUP", Type: "Selector", Now: "香港", All: []string{"香港"}},
+		},
+		Order: []string{"GROUP"},
+	}
+	msg := ProxiesLoadedMsg{Resp: resp}
+	tab, _, _ := m.Update(msg)
+	m = tab.(*Model)
+
+	m.cursor = 0
+	cmd = m.testGroupDelay()
+	if cmd == nil {
+		t.Fatal("testGroupDelay should return a command")
+	}
+	if !m.testing["GROUP"] {
+		t.Error("testing flag should be set")
+	}
+
+	cmd = m.testGroupDelay()
+	if cmd != nil {
+		t.Error("testGroupDelay should return nil when already testing")
+	}
+}
+
+// TestGroupDelayDKeyMember verifies pressing 'd' on a member row does nothing.
+func TestGroupDelayDKeyMember(t *testing.T) {
+	resp := client.ProxiesResponse{
+		Proxies: map[string]client.Proxy{
+			"GROUP": {Name: "GROUP", Type: "Selector", Now: "香港", All: []string{"香港"}},
+		},
+		Order: []string{"GROUP"},
+	}
+	msg := ProxiesLoadedMsg{Resp: resp}
+	m := New(nil)
+	m.SetSize(80, 20)
+	tab, _, _ := m.Update(msg)
+	m = tab.(*Model)
+
+	m.cursor = 0
+	_ = m.expandOrSwitch()
+
+	m.cursor = 1
+	cmd := m.testGroupDelay()
+	if cmd != nil {
+		t.Error("testGroupDelay should return nil on member row")
 	}
 }

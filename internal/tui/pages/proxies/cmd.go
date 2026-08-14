@@ -37,3 +37,12 @@ func setModeCmd(c *client.Client, mode string) tea.Cmd {
 		return ModeOpMsg{Err: err}
 	}
 }
+
+// GroupDelayCmd returns a command that tests the delay of all members in a group.
+// The timeout is 5 seconds and the test URL is http://www.gstatic.com/generate_204.
+func GroupDelayCmd(c *client.Client, group string) tea.Cmd {
+	return func() tea.Msg {
+		delays, err := c.GetGroupDelay(group, 5000, "http://www.gstatic.com/generate_204")
+		return GroupDelayMsg{Group: group, Delays: delays, Err: err}
+	}
+}

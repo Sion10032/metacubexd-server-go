@@ -90,6 +90,10 @@ func (m Model) updateProxiesMsg(msg tea.Msg) (Model, tea.Cmd) {
 		tab, cmd, _ := m.tabs[idxProxy].Update(msg)
 		m.tabs[idxProxy] = tab
 		return m, cmd
+	case proxies.GroupDelayMsg:
+		tab, cmd, _ := m.tabs[idxProxy].Update(msg)
+		m.tabs[idxProxy] = tab
+		return m, cmd
 	}
 	return m, nil
 }
