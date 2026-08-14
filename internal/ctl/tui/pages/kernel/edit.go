@@ -55,8 +55,9 @@ func (m *Model) startEditField(i int) (shared.Tab, tea.Cmd, bool) {
 	in.Prompt = ""
 	in.SetWidth(40)
 	in.SetValue(m.network.valueOf(networkFields[i]))
+	cmd := in.Focus()
 	m.editInput = in
-	return m, in.Focus(), true
+	return m, cmd, true
 }
 
 // updateEdit drives the network field editor: enter saves via PutSection, esc
