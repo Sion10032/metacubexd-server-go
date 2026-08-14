@@ -54,17 +54,17 @@ func TestKernelTabRender(t *testing.T) {
 // TestKernelTabSelect verifies up/down move the selection with wraparound.
 func TestKernelTabSelect(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	nm, _ := m.Update(keyPress("4")) // Config tab
+	nm, _ := m.Update(keyPress("5")) // Config tab
 
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if got := nm.(Model).tabs[3].(*kernel.Model).SelectedOp(); got != 2 {
+	if got := nm.(Model).tabs[4].(*kernel.Model).SelectedOp(); got != 2 {
 		t.Errorf("kSelected after 2x down = %d, want 2", got)
 	}
 
 	// up wraps to the last entry.
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-	if got := nm.(Model).tabs[3].(*kernel.Model).SelectedOp(); got != 1 {
+	if got := nm.(Model).tabs[4].(*kernel.Model).SelectedOp(); got != 1 {
 		t.Errorf("kSelected after up = %d, want 1", got)
 	}
 }
@@ -81,13 +81,13 @@ func TestKernelTabExecute(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(keyPress("4")) // Config tab
+	nm, _ := m.Update(keyPress("5")) // Config tab
 
 	nm, cmd := nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // enter on Start
 	if cmd == nil {
 		t.Fatal("enter returned no command")
 	}
-	if !nm.(Model).tabs[3].(*kernel.Model).Operating() {
+	if !nm.(Model).tabs[4].(*kernel.Model).Operating() {
 		t.Error("operating should be true while the operation runs")
 	}
 	runBatch(t, cmd) // spinner tick + kernel op
@@ -108,7 +108,7 @@ func _TestRecoverConfirm(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(keyPress("4")) // Config tab
+	nm, _ := m.Update(keyPress("5")) // Config tab
 	for i := 0; i < 4; i++ {
 		nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
@@ -119,7 +119,7 @@ func _TestRecoverConfirm(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("confirm state should not issue a command")
 	}
-	if !nm.(Model).tabs[3].(*kernel.Model).Confirming() {
+	if !nm.(Model).tabs[4].(*kernel.Model).Confirming() {
 		t.Fatal("kConfirming should be true")
 	}
 	if got := nm.View().Content; !strings.Contains(got, "确认执行") {
@@ -138,9 +138,9 @@ func _TestRecoverConfirm(t *testing.T) {
 
 	// Any other key cancels without issuing a request.
 	gotURI = ""
-	nm, _ = m.Update(keyPress("4"))
+	nm, _ = m.Update(keyPress("5"))
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	nm, _ = nm.Update(keyPress("4")) // back to config
+	nm, _ = nm.Update(keyPress("5")) // back to config
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	nm, cmd = nm.Update(keyPress("n"))
 	if cmd != nil {
@@ -149,7 +149,7 @@ func _TestRecoverConfirm(t *testing.T) {
 	if gotURI != "" {
 		t.Errorf("unexpected request after cancel: %q", gotURI)
 	}
-	if nm.(Model).tabs[3].(*kernel.Model).Confirming() {
+	if nm.(Model).tabs[4].(*kernel.Model).Confirming() {
 		t.Error("kConfirming should be false after cancel")
 	}
 }
@@ -157,7 +157,7 @@ func _TestRecoverConfirm(t *testing.T) {
 // TestSpinnerTick verifies spinner ticks keep flowing while operating.
 func TestSpinnerTick(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	nm, _ := m.Update(keyPress("4"))
+	nm, _ := m.Update(keyPress("5"))
 	nm, cmd := nm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // Start
 
 	// Batch returns the child commands; find the spinner tick among them.

@@ -24,7 +24,7 @@ func TestViewLayout(t *testing.T) {
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	got := shared.ANSIRe.ReplaceAllString(m.View().Content, "")
-	for _, want := range []string{"[1] Logs", "[2] Proxy", "[3] Subscriptions", "[4] Config", "/:filter", "f:follow(ON)", "q:quit"} {
+	for _, want := range []string{"[1] Connections", "[2] Proxy", "[3] Subscriptions", "[4] Logs", "[5] Config", "x:close", "X:close all", "q:quit"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("View = %q, missing %q", got, want)
 		}
@@ -36,13 +36,19 @@ func TestViewLayout(t *testing.T) {
 func TestTabHelp(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 
+	// Connections tab is default, verify its footer.
+	if got := m.View().Content; !strings.Contains(got, "x:close") {
+		t.Errorf("Connections footer missing x:close: %q", got)
+	}
+
 	// Logs tab: filter/follow.
-	if got := m.View().Content; !strings.Contains(got, "/:filter") {
+	nm, _ := m.Update(keyPress("4"))
+	if got := nm.View().Content; !strings.Contains(got, "/:filter") {
 		t.Errorf("Logs footer missing filter: %q", got)
 	}
 
 	// Profiles tab: profile operations.
-	nm, _ := m.Update(keyPress("3"))
+	nm, _ = nm.Update(keyPress("3"))
 	got := nm.View().Content
 	for _, want := range []string{"a:activate", "u:refresh", "d:delete", "i:import"} {
 		if !strings.Contains(got, want) {
@@ -54,7 +60,7 @@ func TestTabHelp(t *testing.T) {
 	}
 
 	// Config tab: kernel selection.
-	nm, _ = nm.Update(keyPress("4"))
+	nm, _ = nm.Update(keyPress("5"))
 	if got := nm.View().Content; !strings.Contains(got, "enter:run") {
 		t.Errorf("Config footer missing enter:run:\n%s", got)
 	}
@@ -70,9 +76,9 @@ func TestTabSwitch(t *testing.T) {
 		t.Errorf("View after tab 3 = %q, want profiles table", got)
 	}
 
-	nm, _ = nm.Update(keyPress("1"))
-	if got := nm.View().Content; !strings.Contains(got, "waiting for log stream") && !strings.Contains(got, "[1] Logs") {
-		t.Errorf("View after tab 1 = %q, want log viewport", got)
+	nm, _ = nm.Update(keyPress("4"))
+	if got := nm.View().Content; !strings.Contains(got, "waiting for log stream") && !strings.Contains(got, "[4] Logs") {
+		t.Errorf("View after tab 4 = %q, want log viewport", got)
 	}
 }
 
@@ -229,7 +235,7 @@ func TestNoFilterLeakOnOtherTabs(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(keyPress("3")) // Profiles tab
 
-	logsTab := nm.(Model).tabs[0].(*logs.Model)
+	logsTab := nm.(Model).tabs[idxLogs].(*logs.Model)
 	if logsTab.Filtering() {
 		t.Fatal("logs should not be filtering before any key")
 	}
@@ -253,15 +259,16 @@ func TestNoFilterLeakOnOtherTabs(t *testing.T) {
 func TestKernelTabPgDnNoScroll(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	nm, _ = nm.Update(keyPress("4")) // Logs tab
 	nm, _ = nm.Update(keyPress("f")) // follow off
 	for i := 0; i < 50; i++ {
 		nm, _ = nm.Update(shared.LogLineMsg{Line: fmt.Sprintf("line %d", i)})
 	}
 
-	nm, _ = nm.Update(keyPress("4")) // Config tab
+	nm, _ = nm.Update(keyPress("5")) // Config tab
 	nm, _ = nm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	mdl := nm.(Model)
-	if got := mdl.tabs[0].(*logs.Model).YOffset(); got != 0 {
+	if got := mdl.tabs[3].(*logs.Model).YOffset(); got != 0 {
 		t.Errorf("PgDn on Config tab scrolled logs (YOffset=%d), want 0", got)
 	}
 }
@@ -270,15 +277,15 @@ func TestKernelTabPgDnNoScroll(t *testing.T) {
 // all keys including "1" which should not switch tabs (scenario #12).
 func TestKeyConfirmingSwallowsTabKeys(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
-	nm, _ := m.Update(keyPress("4")) // Config tab
-	kernelTab := nm.(Model).tabs[3].(*kernel.Model)
+	nm, _ := m.Update(keyPress("5")) // Config tab
+	kernelTab := nm.(Model).tabs[4].(*kernel.Model)
 	if kernelTab.Confirming() {
 		t.Fatal("should not be confirming initially")
 	}
 	// Simulate kConfirming by setting it directly (Recover is commented out,
 	// so we cannot trigger it via the menu).
 	mdl := nm.(Model)
-	mdl.tabs[3].(*kernel.Model).ResetOperation()
+	mdl.tabs[4].(*kernel.Model).ResetOperation()
 	nm = mdl
 
 	// We can't easily trigger kConfirming through the menu since Recover is

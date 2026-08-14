@@ -9,6 +9,7 @@ import (
 
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui/components"
+	"metacubexd-server-go/internal/ctl/tui/pages/connections"
 	"metacubexd-server-go/internal/ctl/tui/pages/kernel"
 	"metacubexd-server-go/internal/ctl/tui/pages/logs"
 	"metacubexd-server-go/internal/ctl/tui/pages/profiles"
@@ -19,26 +20,28 @@ import (
 
 // Tab indices.
 const (
-	idxLogs     = 0
-	idxProxy    = 1
-	idxProfiles = 2
-	idxKernel   = 3
+	idxConnection = 0
+	idxProxy      = 1
+	idxProfiles   = 2
+	idxLogs       = 3
+	idxKernel     = 4
 )
 
 // Model is the top-level Bubble Tea model. It owns the kernel state, the
 // active tab index and the tab pages; feature state lives inside each page.
 type Model struct {
-	client    *ctl.Client
-	state     *supervisor.KernelState
-	err       error
-	tabs      []shared.Tab
-	activeTab int
-	spinner   spinner.Model
-	width     int
-	height    int
-	logCh     <-chan ctl.Event
-	logCancel context.CancelFunc
-	quitting  bool
+	client     *ctl.Client
+	state      *supervisor.KernelState
+	err        error
+	tabs       []shared.Tab
+	activeTab  int
+	spinner    spinner.Model
+	width      int
+	height     int
+	logCh      <-chan ctl.Event
+	logCancel  context.CancelFunc
+	connCancel context.CancelFunc
+	quitting   bool
 }
 
 // New returns a Model for the given control API client.
@@ -48,7 +51,7 @@ func New(client *ctl.Client) Model {
 	s.Style = shared.SpinnerStyle
 	return Model{
 		client:  client,
-		tabs:    []shared.Tab{logs.New(client), proxies.New(client), profiles.New(client), kernel.New(client)},
+		tabs:    []shared.Tab{connections.New(client), proxies.New(client), profiles.New(client), logs.New(client), kernel.New(client)},
 		spinner: s,
 	}
 }
@@ -61,6 +64,7 @@ func (m Model) Init() tea.Cmd {
 		shared.StatusTick(),
 		shared.Subscribe(m.client),
 		profiles.FetchProfiles(m.client),
+		connections.FetchConnections(m.client),
 		shared.RequestBackgroundColor(),
 	)
 }
@@ -107,6 +111,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateProxiesMsg(msg)
 	case kernel.ConfigLoadedMsg, kernel.NetworkSettingsMsg, kernel.SectionEditMsg:
 		return m.updateKernelMsg(msg)
+	case connections.ConnectionsLoadedMsg, connections.ConnectionOpMsg:
+		return m.updateConnectionsMsg(msg)
+	case shared.ConnectionTickMsg:
+		return m.updateConnectionTick(msg)
 	}
 	return m, nil
 }
@@ -125,7 +133,11 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 		m.quitting = true
 		m.closeLogStream()
 		return m, tea.Quit
-	case "1", "2", "3", "4":
+	case "1", "2", "3", "4", "5":
+		// Stop connection refresh when leaving the connection tab
+		if m.activeTab == idxConnection && m.activeTab != int(key[0]-'1') {
+			m.closeConnectionStream()
+		}
 		m.activeTab = int(key[0] - '1')
 		if m.activeTab == idxKernel && !m.kernelPage().NetworkLoaded() {
 			return m, kernel.FetchNetworkSettings(m.client)
@@ -133,6 +145,10 @@ func (m Model) updateKey(msg tea.Msg) (Model, tea.Cmd) {
 		if m.activeTab == idxProxy {
 			// Lazy load proxies on first visit
 			return m, tea.Batch(proxies.FetchProxies(m.client), proxies.FetchMode(m.client))
+		}
+		if m.activeTab == idxConnection {
+			// Start connection refresh when entering the tab
+			return m, shared.ConnectionTick()
 		}
 	default:
 		// Scroll fallback: on any tab except Kernel, unhandled scroll keys

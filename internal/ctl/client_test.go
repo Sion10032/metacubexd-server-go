@@ -554,3 +554,85 @@ func TestSetMode(t *testing.T) {
 		t.Errorf("body.mode = %q, want global", body.Mode)
 	}
 }
+
+// TestListConnections verifies ListConnections decodes the connections response.
+func TestListConnections(t *testing.T) {
+	const body = `{"downloadTotal":1024,"uploadTotal":512,"connections":[{"id":"conn1","upload":100,"download":200,"start":"2024-01-01T00:00:00Z","chains":["GLOBAL","node1"],"rule":"DOMAIN-SUFFIX","rulePayload":"example.com","metadata":{"network":"tcp","type":"HTTP","sourceIP":"127.0.0.1","destinationIP":"93.184.216.34","sourcePort":"12345","destinationPort":"80","host":"example.com","processPath":"/usr/bin/curl"}}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.RequestURI != "/api/clash/connections" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.RequestURI)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", false)
+	resp, err := c.ListConnections()
+	if err != nil {
+		t.Fatalf("ListConnections: %v", err)
+	}
+	if resp.DownloadTotal != 1024 {
+		t.Errorf("DownloadTotal = %d, want 1024", resp.DownloadTotal)
+	}
+	if resp.UploadTotal != 512 {
+		t.Errorf("UploadTotal = %d, want 512", resp.UploadTotal)
+	}
+	if len(resp.Connections) != 1 {
+		t.Fatalf("Connections = %d, want 1", len(resp.Connections))
+	}
+	conn := resp.Connections[0]
+	if conn.ID != "conn1" {
+		t.Errorf("ID = %q, want conn1", conn.ID)
+	}
+	if conn.Upload != 100 {
+		t.Errorf("Upload = %d, want 100", conn.Upload)
+	}
+	if conn.Download != 200 {
+		t.Errorf("Download = %d, want 200", conn.Download)
+	}
+	if len(conn.Chains) != 2 || conn.Chains[0] != "GLOBAL" || conn.Chains[1] != "node1" {
+		t.Errorf("Chains = %v, want [GLOBAL node1]", conn.Chains)
+	}
+	if conn.Metadata.Host != "example.com" {
+		t.Errorf("Metadata.Host = %q, want example.com", conn.Metadata.Host)
+	}
+}
+
+// TestCloseConnection verifies CloseConnection sends DELETE with the correct id.
+func TestCloseConnection(t *testing.T) {
+	var gotURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.Method + " " + r.RequestURI
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", false)
+	if err := c.CloseConnection("conn123"); err != nil {
+		t.Fatalf("CloseConnection: %v", err)
+	}
+	if want := "DELETE /api/clash/connections/conn123"; gotURI != want {
+		t.Errorf("request = %q, want %q", gotURI, want)
+	}
+}
+
+// TestCloseAllConnections verifies CloseAllConnections sends DELETE without id.
+func TestCloseAllConnections(t *testing.T) {
+	var gotURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI = r.Method + " " + r.RequestURI
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", false)
+	if err := c.CloseAllConnections(); err != nil {
+		t.Fatalf("CloseAllConnections: %v", err)
+	}
+	if want := "DELETE /api/clash/connections"; gotURI != want {
+		t.Errorf("request = %q, want %q", gotURI, want)
+	}
+}

@@ -24,7 +24,7 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd) {
 		m.logCh = msg.Ch
 		return m, shared.ForwardEvents(msg.Ch)
 	case shared.LogLineMsg:
-		m.tabs[0].Update(msg)
+		m.tabs[idxLogs].Update(msg)
 		return m, shared.ForwardEvents(m.logCh)
 	case shared.KernelStateMsg:
 		m.state = &msg.State

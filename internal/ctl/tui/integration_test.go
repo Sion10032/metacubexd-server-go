@@ -22,6 +22,9 @@ func TestSSEToView(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/control/kernel/status":
 			fmt.Fprint(w, `{"status":"running","pid":42,"version":"v1.19.29","externalController":"127.0.0.1:9090"}`)
+		case "/api/clash/connections":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"downloadTotal":0,"uploadTotal":0,"connections":[]}`)
 		case "/api/control/kernel/logs":
 			w.Header().Set("Content-Type", "text/event-stream")
 			flusher := w.(http.Flusher)
@@ -74,6 +77,8 @@ func TestSSEToView(t *testing.T) {
 	}
 
 	// The view renders the received lines, scrolled to the bottom.
+	// Switch to Logs tab to see the log content.
+	nm, _ = nm.Update(keyPress("4"))
 	if v := nm.View().Content; !strings.Contains(v, "line 2") {
 		t.Errorf("View missing last line:\n%s", v)
 	}
