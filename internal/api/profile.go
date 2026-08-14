@@ -14,6 +14,7 @@ type Meta struct {
 	EditorStatus     string            `json:"editorStatus,omitempty"`
 	UpdatedAt        int64             `json:"updatedAt"`
 	SubscriptionInfo *SubscriptionInfo `json:"subscriptionInfo,omitempty"`
+	Active           bool              `json:"active,omitempty"` // derived: stamped by GET /profiles, never persisted
 }
 
 // SubscriptionInfo is the parsed Subscription-Userinfo response header

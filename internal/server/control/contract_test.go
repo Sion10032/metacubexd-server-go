@@ -186,6 +186,53 @@ func TestContractProfileCreateShape(t *testing.T) {
 	}
 }
 
+// TestContractProfilesActiveField verifies GET /profiles stamps the active
+// field: the activated profile has active=true, others have active=false.
+func TestContractProfilesActiveField(t *testing.T) {
+	r := contractRouter(t)
+	handler := New(r)
+
+	// Create two profiles.
+	resp1 := doRequest(handler, "POST", "/api/control/profiles",
+		`{"name":"p1","content":"a: 1"}`)
+	var m1 map[string]any
+	jsonDecode(t, resp1.Body, &m1)
+	id1, _ := m1["id"].(string)
+
+	resp2 := doRequest(handler, "POST", "/api/control/profiles",
+		`{"name":"p2","content":"b: 2"}`)
+	var m2 map[string]any
+	jsonDecode(t, resp2.Body, &m2)
+	id2, _ := m2["id"].(string)
+
+	// Activate p1 (may fail validation, but the store marks it active).
+	doRequest(handler, "POST", "/api/control/profiles/"+id1+"/activate", "")
+
+	// GET /profiles should stamp active on each item.
+	listResp := doRequest(handler, "GET", "/api/control/profiles", "")
+	var list []map[string]any
+	jsonDecode(t, listResp.Body, &list)
+
+	foundActive := false
+	for _, item := range list {
+		id, _ := item["id"].(string)
+		active, _ := item["active"].(bool)
+		if id == id1 {
+			if !active {
+				t.Errorf("profile %s should be active", id1)
+			}
+			foundActive = true
+		} else if id == id2 {
+			if active {
+				t.Errorf("profile %s should not be active", id2)
+			}
+		}
+	}
+	if !foundActive {
+		t.Errorf("no active profile found in list")
+	}
+}
+
 func doRequest(handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	var req *http.Request
 	if body != "" {

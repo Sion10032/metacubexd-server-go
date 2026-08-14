@@ -34,7 +34,12 @@ func registerProfileRoutes(r chi.Router, deps *Router) {
 	p := deps.Profiles
 
 	r.Get("/api/control/profiles", func(w http.ResponseWriter, req *http.Request) {
-		writeJSON(w, http.StatusOK, p.List())
+		list := p.List()
+		active := p.GetActiveID()
+		for i := range list {
+			list[i].Active = list[i].ID == active
+		}
+		writeJSON(w, http.StatusOK, list)
 	})
 
 	r.Post("/api/control/profiles", func(w http.ResponseWriter, req *http.Request) {

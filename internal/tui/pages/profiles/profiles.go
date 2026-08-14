@@ -18,9 +18,10 @@ import (
 )
 
 // Model renders the profile list as a table. The active profile is marked
-// with a dot; activeID is tracked from the operations this session has run
-// (the server does not expose the active id via /profiles). The import form
-// and the delete confirmation are inline states owned by this page.
+// with a dot; activeID is derived from the server's Active field on the
+// profile list (stamped by GET /profiles) with session-based fallback. The
+// import form and the delete confirmation are inline states owned by this
+// page.
 type Model struct {
 	table      table.Model
 	profiles   []api.Meta
@@ -78,14 +79,26 @@ func (m *Model) SetSize(width, height int) {
 	m.table.SetHeight(height)
 }
 
-// SetProfiles rebuilds the table rows from a profile list.
+// SetProfiles rebuilds the table rows from a profile list. If any profile
+// carries Active=true from the server, its id becomes the activeID (the
+// server stamps this on GET /profiles). Otherwise the session-tracked
+// activeID is preserved as a fallback.
 func (m *Model) SetProfiles(list []api.Meta, activeID string) {
 	m.profiles = list
-	m.activeID = activeID
+	// Prefer server-stamped active ID; fall back to session tracking.
+	for _, meta := range list {
+		if meta.Active {
+			m.activeID = meta.ID
+			break
+		}
+	}
+	if m.activeID == "" {
+		m.activeID = activeID
+	}
 	rows := make([]table.Row, 0, len(list))
 	for _, meta := range list {
 		active := ""
-		if meta.ID == activeID {
+		if meta.ID == m.activeID {
 			active = "●"
 		}
 		rows = append(rows, table.Row{

@@ -146,3 +146,30 @@ func TestProfileDeleteConfirm(t *testing.T) {
 		t.Error("confirmDel should reset after cancel")
 	}
 }
+
+// TestProfilesActiveField verifies that the server-stamped Active field on
+// profiles is used to derive the activeID, restoring the highlight after
+// restart.
+func TestProfilesActiveField(t *testing.T) {
+	m := New(client.NewClient("http://127.0.0.1:1", "", false))
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Simulate a GET /profiles response with active=true on profile "b".
+	nm, _ = nm.Update(profiles.ProfilesLoadedMsg{List: []api.Meta{
+		{ID: "a", Name: "base", Type: "local", UpdatedAt: 1723456789000},
+		{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1723456789000, Active: true},
+	}})
+	mdl := nm.(Model)
+	profPage := mdl.tabs[2].(*profiles.Model)
+
+	if got := profPage.ActiveID(); got != "b" {
+		t.Errorf("activeID = %q, want b (from Active field)", got)
+	}
+
+	// Switch to profiles tab and check the table.
+	nm, _ = nm.Update(keyPress("3"))
+	got := shared.ANSIRe.ReplaceAllString(nm.View().Content, "")
+	if !strings.Contains(got, "●") {
+		t.Errorf("profiles tab missing active marker:\n%s", got)
+	}
+}
