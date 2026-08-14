@@ -9,7 +9,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
 )
 
 // Theme styles, rebuilt by SetTheme once the terminal background (dark vs
@@ -71,13 +71,13 @@ func SetModalBackground(c color.Color) {
 }
 
 // StatusStyle returns the color style for a kernel status.
-func StatusStyle(s supervisor.KernelStatus) lipgloss.Style {
+func StatusStyle(s api.KernelStatus) lipgloss.Style {
 	switch s {
-	case supervisor.StatusRunning:
+	case api.StatusRunning:
 		return StatusRunningStyle
-	case supervisor.StatusErrored:
+	case api.StatusErrored:
 		return StatusErroredStyle
-	case supervisor.StatusStarting, supervisor.StatusStopping:
+	case api.StatusStarting, api.StatusStopping:
 		return StatusBusyStyle
 	default:
 		return StatusStoppedStyle

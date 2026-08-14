@@ -21,9 +21,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"metacubexd-server-go/internal/profile"
-	"metacubexd-server-go/internal/sse"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
+	"metacubexd-server-go/internal/server/profile"
+	"metacubexd-server-go/internal/server/sse"
+	"metacubexd-server-go/internal/server/supervisor"
 )
 
 // Info describes the server to the dashboard. The shape mirrors the TS
@@ -208,16 +209,16 @@ func (r Router) handleKernelLogs(w http.ResponseWriter, req *http.Request) {
 	// Buffered channels so a chatty kernel can't block the supervisor's mutex
 	// when the SSE client is slow; overflow drops log lines (acceptable: the
 	// dashboard isn't a durable log store).
-	logCh := make(chan supervisor.KernelLogLine, 64)
-	stateCh := make(chan supervisor.KernelState, 16)
+	logCh := make(chan api.KernelLogLine, 64)
+	stateCh := make(chan api.KernelState, 16)
 
-	logID := r.Supervisor.OnLog(func(l supervisor.KernelLogLine) {
+	logID := r.Supervisor.OnLog(func(l api.KernelLogLine) {
 		select {
 		case logCh <- l:
 		default:
 		}
 	})
-	stateID := r.Supervisor.OnState(func(s supervisor.KernelState) {
+	stateID := r.Supervisor.OnState(func(s api.KernelState) {
 		select {
 		case stateCh <- s:
 		default:
@@ -257,18 +258,18 @@ func (r Router) handleKernelLogs(w http.ResponseWriter, req *http.Request) {
 // the JSON object.
 type stateEvent struct {
 	Type string `json:"type"` // "state"
-	supervisor.KernelState
+	api.KernelState
 }
 
 type logEvent struct {
 	Type string `json:"type"` // "log"
-	supervisor.KernelLogLine
+	api.KernelLogLine
 }
 
 // respondKernel writes a kernel state snapshot, or a 500 with lastError if the
 // lifecycle op failed. Lifecycle ops don't have a meaningful error body beyond
 // state.LastError, so we fold the two together.
-func respondKernel(w http.ResponseWriter, st supervisor.KernelState, err error) {
+func respondKernel(w http.ResponseWriter, st api.KernelState, err error) {
 	if err != nil {
 		// The state already carries lastError; surface it as 500 for clients
 		// that distinguish HTTP status, plus the body for diagnostics.

@@ -12,7 +12,7 @@ import (
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui/pages/profiles"
 	"metacubexd-server-go/internal/ctl/tui/shared"
-	"metacubexd-server-go/internal/profile"
+	"metacubexd-server-go/internal/api"
 )
 
 // TestProfilesTabLoaded verifies loading profiles renders the table and the
@@ -20,7 +20,7 @@ import (
 func TestProfilesTabLoaded(t *testing.T) {
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	nm, _ = nm.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{
+	nm, _ = nm.Update(profiles.ProfilesLoadedMsg{List: []api.Meta{
 		{ID: "a", Name: "base", Type: "local", UpdatedAt: 1723456789000},
 		{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1723456789000},
 	}})
@@ -51,7 +51,7 @@ func TestProfileActivateKey(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []api.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
 	nm, _ = nm.Update(keyPress("3")) // Profiles tab
 
 	nm, cmd := nm.Update(keyPress("a"))
@@ -80,7 +80,7 @@ func TestProfileRefreshKey(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []api.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
 	nm, _ = nm.Update(keyPress("3"))
 
 	nm, cmd := nm.Update(keyPress("u"))
@@ -108,7 +108,7 @@ func TestProfileDeleteConfirm(t *testing.T) {
 	defer srv.Close()
 
 	m := New(ctl.NewClient(srv.URL, "", false))
-	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ := m.Update(profiles.ProfilesLoadedMsg{List: []api.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
 	nm, _ = nm.Update(keyPress("3"))
 
 	nm, cmd := nm.Update(keyPress("d"))
@@ -133,7 +133,7 @@ func TestProfileDeleteConfirm(t *testing.T) {
 
 	// Any other key cancels without issuing a request.
 	gotURI = ""
-	nm, _ = nm.Update(profiles.ProfilesLoadedMsg{List: []profile.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
+	nm, _ = nm.Update(profiles.ProfilesLoadedMsg{List: []api.Meta{{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1}}})
 	nm, _ = nm.Update(keyPress("d"))
 	nm, cmd = nm.Update(keyPress("n"))
 	if cmd != nil {

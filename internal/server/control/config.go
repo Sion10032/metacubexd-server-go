@@ -18,7 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"metacubexd-server-go/internal/profile"
+	"metacubexd-server-go/internal/server/profile"
 )
 
 // registerConfigRoutes wires /api/control/config* onto r. Called from

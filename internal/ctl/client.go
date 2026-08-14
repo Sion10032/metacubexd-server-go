@@ -12,8 +12,7 @@ import (
 	"net/url"
 	"time"
 
-	"metacubexd-server-go/internal/profile"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
 )
 
 // ErrUnauthorized is returned when the control API rejects the credentials:
@@ -64,19 +63,19 @@ func (c *Client) do(method, path string, body io.Reader) (*http.Response, error)
 }
 
 // KernelStatus fetches the current kernel state from the server.
-func (c *Client) KernelStatus() (supervisor.KernelState, error) {
+func (c *Client) KernelStatus() (api.KernelState, error) {
 	resp, err := c.do(http.MethodGet, "/api/control/kernel/status", nil)
 	if err != nil {
-		return supervisor.KernelState{}, err
+		return api.KernelState{}, err
 	}
 	defer resp.Body.Close()
 	return decodeState(resp)
 }
 
-// decodeState decodes a supervisor.KernelState and returns an error when the
+// decodeState decodes an api.KernelState and returns an error when the
 // response is not 2xx, preferring the server-provided lastError message.
-func decodeState(resp *http.Response) (supervisor.KernelState, error) {
-	var st supervisor.KernelState
+func decodeState(resp *http.Response) (api.KernelState, error) {
+	var st api.KernelState
 	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
 		return st, err
 	}
@@ -141,8 +140,8 @@ func (c *Client) doText(method, path string, body io.Reader) (string, error) {
 }
 
 // ProfilesList fetches all profiles.
-func (c *Client) ProfilesList() ([]profile.Meta, error) {
-	var list []profile.Meta
+func (c *Client) ProfilesList() ([]api.Meta, error) {
+	var list []api.Meta
 	if err := c.doJSON(http.MethodGet, "/api/control/profiles", nil, &list); err != nil {
 		return nil, err
 	}
@@ -150,8 +149,8 @@ func (c *Client) ProfilesList() ([]profile.Meta, error) {
 }
 
 // ProfileImport fetches a remote subscription URL into a new profile.
-func (c *Client) ProfileImport(url, name string) (profile.Meta, error) {
-	var m profile.Meta
+func (c *Client) ProfileImport(url, name string) (api.Meta, error) {
+	var m api.Meta
 	body, err := json.Marshal(struct {
 		URL  string `json:"url"`
 		Name string `json:"name"`
@@ -166,8 +165,8 @@ func (c *Client) ProfileImport(url, name string) (profile.Meta, error) {
 }
 
 // ProfileRefresh re-fetches a subscription profile in place.
-func (c *Client) ProfileRefresh(id string) (profile.Meta, error) {
-	var m profile.Meta
+func (c *Client) ProfileRefresh(id string) (api.Meta, error) {
+	var m api.Meta
 	if err := c.doJSON(http.MethodPost, "/api/control/profiles/"+id+"/refresh", nil, &m); err != nil {
 		return m, err
 	}
@@ -176,19 +175,19 @@ func (c *Client) ProfileRefresh(id string) (profile.Meta, error) {
 
 // ProfileRefreshAndActivate refreshes a profile and activates it, restarting
 // the kernel.
-func (c *Client) ProfileRefreshAndActivate(id string) (profile.Meta, error) {
+func (c *Client) ProfileRefreshAndActivate(id string) (api.Meta, error) {
 	var out struct {
-		Meta profile.Meta `json:"meta"`
+		Meta api.Meta `json:"meta"`
 	}
 	if err := c.doJSON(http.MethodPost, "/api/control/profiles/"+id+"/refresh-and-activate", nil, &out); err != nil {
-		return profile.Meta{}, err
+		return api.Meta{}, err
 	}
 	return out.Meta, nil
 }
 
 // ProfileActivate activates a profile and restarts the kernel.
-func (c *Client) ProfileActivate(id string) (supervisor.KernelState, error) {
-	var st supervisor.KernelState
+func (c *Client) ProfileActivate(id string) (api.KernelState, error) {
+	var st api.KernelState
 	if err := c.doJSON(http.MethodPost, "/api/control/profiles/"+id+"/activate", nil, &st); err != nil {
 		return st, err
 	}
@@ -270,37 +269,37 @@ func (c *Client) Restore(opts WebdavOptions) (int, error) {
 }
 
 // KernelStart starts the kernel and returns the new state.
-func (c *Client) KernelStart() (supervisor.KernelState, error) {
+func (c *Client) KernelStart() (api.KernelState, error) {
 	return c.postKernel("/api/control/kernel/start")
 }
 
 // KernelStop stops the kernel and returns the new state.
-func (c *Client) KernelStop() (supervisor.KernelState, error) {
+func (c *Client) KernelStop() (api.KernelState, error) {
 	return c.postKernel("/api/control/kernel/stop")
 }
 
 // KernelRestart restarts the kernel and returns the new state.
-func (c *Client) KernelRestart() (supervisor.KernelState, error) {
+func (c *Client) KernelRestart() (api.KernelState, error) {
 	return c.postKernel("/api/control/kernel/restart")
 }
 
 // KernelRollback restores the last-known-good active config and restarts.
-func (c *Client) KernelRollback() (supervisor.KernelState, error) {
+func (c *Client) KernelRollback() (api.KernelState, error) {
 	return c.postKernel("/api/control/kernel/rollback")
 }
 
 // KernelRecover resets the active config to header-only and restarts on
 // mihomo defaults — the last-resort escape hatch for a bricked config.
-func (c *Client) KernelRecover() (supervisor.KernelState, error) {
+func (c *Client) KernelRecover() (api.KernelState, error) {
 	return c.postKernel("/api/control/kernel/recover")
 }
 
 // postKernel performs a POST to a kernel control path and decodes the
 // resulting kernel state.
-func (c *Client) postKernel(path string) (supervisor.KernelState, error) {
+func (c *Client) postKernel(path string) (api.KernelState, error) {
 	resp, err := c.do(http.MethodPost, path, nil)
 	if err != nil {
-		return supervisor.KernelState{}, err
+		return api.KernelState{}, err
 	}
 	defer resp.Body.Close()
 	return decodeState(resp)

@@ -5,7 +5,7 @@ import (
 
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui/shared"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
 )
 
 // FetchConfig loads the active (ConfigActive) or runtime (ConfigRuntime)
@@ -58,7 +58,7 @@ func SectionEdit(c *ctl.Client, key, value string) tea.Cmd {
 
 // kernelOpCmd runs a kernel operation via the client and pushes the fresh
 // state, refreshing the status bar when done.
-func kernelOpCmd(c *ctl.Client, op func(*ctl.Client) (supervisor.KernelState, error)) tea.Cmd {
+func kernelOpCmd(c *ctl.Client, op func(*ctl.Client) (api.KernelState, error)) tea.Cmd {
 	return func() tea.Msg {
 		st, err := op(c)
 		if err != nil {

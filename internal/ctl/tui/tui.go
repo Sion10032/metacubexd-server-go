@@ -15,7 +15,7 @@ import (
 	"metacubexd-server-go/internal/ctl/tui/pages/profiles"
 	"metacubexd-server-go/internal/ctl/tui/pages/proxies"
 	"metacubexd-server-go/internal/ctl/tui/shared"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
 )
 
 // Tab indices.
@@ -31,7 +31,7 @@ const (
 // active tab index and the tab pages; feature state lives inside each page.
 type Model struct {
 	client     *ctl.Client
-	state      *supervisor.KernelState
+	state      *api.KernelState
 	err        error
 	tabs       []shared.Tab
 	activeTab  int

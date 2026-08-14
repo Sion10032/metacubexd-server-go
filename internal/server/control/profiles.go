@@ -24,8 +24,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"metacubexd-server-go/internal/profile"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
+	"metacubexd-server-go/internal/server/profile"
 )
 
 // registerProfileRoutes wires every /profiles/** route onto r. Called from
@@ -217,10 +217,10 @@ func registerProfileRoutes(r chi.Router, deps *Router) {
 //
 // Either rollback path is best-effort — a failure must not mask the original
 // validation error, so we swallow rollback errors.
-func safeActivate(deps *Router, id string) (supervisor.KernelState, error) {
+func safeActivate(deps *Router, id string) (api.KernelState, error) {
 	prevID := deps.Profiles.GetActiveID()
 	if err := deps.Profiles.SetActive(id); err != nil {
-		return supervisor.KernelState{}, err
+		return api.KernelState{}, err
 	}
 
 	result := deps.Supervisor.Validate(deps.ActiveConfigPath)
@@ -238,7 +238,7 @@ func safeActivate(deps *Router, id string) (supervisor.KernelState, error) {
 
 	// Surface a clean 400 carrying the validator's message. The caller maps
 	// this to the HTTP response.
-	return supervisor.KernelState{}, &ValidateError{Message: result.Message}
+	return api.KernelState{}, &ValidateError{Message: result.Message}
 }
 
 // ValidateError is surfaced by safeActivate when `mihomo -t` rejects the
@@ -253,18 +253,18 @@ func (e *ValidateError) Error() string { return "profile validation failed" }
 // findMeta scans the index for one meta. We don't expose a public Get on the
 // store because list+filter is what the TS does and the index always fits in
 // memory.
-func findMeta(p *profile.Store, id string) (profile.Meta, error) {
+func findMeta(p *profile.Store, id string) (api.Meta, error) {
 	for _, m := range p.List() {
 		if m.ID == id {
 			return m, nil
 		}
 	}
-	return profile.Meta{}, profile.ErrNotFound
+	return api.Meta{}, profile.ErrNotFound
 }
 
 // respondProfileResult writes a created/updated meta, or maps the error to an
 // HTTP status if present.
-func respondProfileResult(w http.ResponseWriter, m profile.Meta, err error) {
+func respondProfileResult(w http.ResponseWriter, m api.Meta, err error) {
 	if err != nil {
 		respondProfileErr(w, err)
 		return

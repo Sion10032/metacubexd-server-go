@@ -9,7 +9,7 @@ import (
 
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui/shared"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
 )
 
 // kernelOp is one operation available on the Config tab, in selection order.
@@ -17,7 +17,7 @@ import (
 // re-enabled later.
 type kernelOp struct {
 	label string
-	op    func(*ctl.Client) (supervisor.KernelState, error)
+	op    func(*ctl.Client) (api.KernelState, error)
 }
 
 var kernelOps = []kernelOp{

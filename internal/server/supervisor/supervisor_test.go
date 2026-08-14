@@ -24,7 +24,7 @@ func buildFakeMihomo(t *testing.T) string {
 	}
 	bin := filepath.Join(t.TempDir(), "fake-mihomo")
 	cmd := exec.Command("go", "build", "-o", bin, "./testdata/fake-mihomo/")
-	cmd.Dir = filepath.Join(getModuleRoot(), "internal", "supervisor")
+	cmd.Dir = filepath.Join(getModuleRoot(), "internal", "server", "supervisor")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build fake-mihomo: %v\n%s", err, out)
 	}

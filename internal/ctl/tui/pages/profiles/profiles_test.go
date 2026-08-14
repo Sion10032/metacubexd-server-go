@@ -12,7 +12,7 @@ import (
 
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui/shared"
-	"metacubexd-server-go/internal/profile"
+	"metacubexd-server-go/internal/api"
 )
 
 // keyPress builds a tea.KeyPressMsg for a printable character, mirroring a
@@ -27,7 +27,7 @@ func keyPress(s string) tea.KeyPressMsg {
 func TestProfilesSetRows(t *testing.T) {
 	p := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	p.SetSize(80, 10)
-	list := []profile.Meta{
+	list := []api.Meta{
 		{ID: "a", Name: "base", Type: "local", UpdatedAt: 1723456789000},
 		{ID: "b", Name: "sub", Type: "remote", UpdatedAt: 1723456789000},
 	}
@@ -132,7 +132,7 @@ func TestProfileHelpPriority(t *testing.T) {
 	}
 
 	p.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
-	p.SetProfiles([]profile.Meta{{ID: "b", Name: "sub", Type: "remote"}}, "")
+	p.SetProfiles([]api.Meta{{ID: "b", Name: "sub", Type: "remote"}}, "")
 	p.Update(keyPress("d"))
 	if got := p.Help(); got != "⚠ 删除所选 profile? (y 确认 / 其他取消)" {
 		t.Errorf("confirm Help = %q", got)

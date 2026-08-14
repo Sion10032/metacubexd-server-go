@@ -15,7 +15,7 @@ import (
 	"metacubexd-server-go/internal/ctl/tui/pages/kernel"
 	"metacubexd-server-go/internal/ctl/tui/pages/logs"
 	"metacubexd-server-go/internal/ctl/tui/shared"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
 )
 
 // TestViewLayout verifies the full layout renders the status bar, the tab bar
@@ -162,8 +162,8 @@ func TestRenderStatus(t *testing.T) {
 	// lipgloss disables colors when the output is not a TTY; force a color
 	// profile so the ANSI assertion below is deterministic in CI.
 	pid := 12345
-	st := &supervisor.KernelState{
-		Status:             supervisor.StatusRunning,
+	st := &api.KernelState{
+		Status:             api.StatusRunning,
 		PID:                &pid,
 		Version:            "v1.19.29",
 		ExternalController: "127.0.0.1:9090",
@@ -184,7 +184,7 @@ func TestRenderStatus(t *testing.T) {
 	}
 
 	// Stopped kernel renders a grey dot and no pid.
-	stopped := &supervisor.KernelState{Status: supervisor.StatusStopped}
+	stopped := &api.KernelState{Status: api.StatusStopped}
 	if got := shared.RenderStatus(stopped, "http://x"); !strings.Contains(got, "stopped") {
 		t.Errorf("shared.RenderStatus(stopped) = %q, want stopped", got)
 	}
@@ -196,8 +196,8 @@ func TestViewStatusBar(t *testing.T) {
 
 	m := New(ctl.NewClient("http://127.0.0.1:1", "", false))
 	pid := 42
-	nm, _ := m.Update(shared.StatusLoadedMsg{State: supervisor.KernelState{
-		Status:             supervisor.StatusRunning,
+	nm, _ := m.Update(shared.StatusLoadedMsg{State: api.KernelState{
+		Status:             api.StatusRunning,
 		PID:                &pid,
 		Version:            "v1.19.29",
 		ExternalController: "127.0.0.1:9090",

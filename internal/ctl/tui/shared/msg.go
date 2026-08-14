@@ -4,12 +4,12 @@ import (
 	"context"
 
 	"metacubexd-server-go/internal/ctl"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
 )
 
 // StatusLoadedMsg carries a fresh kernel state from the control API.
 type StatusLoadedMsg struct {
-	State supervisor.KernelState
+	State api.KernelState
 }
 
 // StatusErrorMsg carries a control API failure (connection, auth, ...).
@@ -33,7 +33,7 @@ type LogLineMsg struct {
 
 // KernelStateMsg carries a kernel state pushed over SSE.
 type KernelStateMsg struct {
-	State supervisor.KernelState
+	State api.KernelState
 }
 
 // LogClosedMsg fires when the SSE log stream ends.

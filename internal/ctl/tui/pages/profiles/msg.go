@@ -1,10 +1,10 @@
 package profiles
 
-import "metacubexd-server-go/internal/profile"
+import "metacubexd-server-go/internal/api"
 
 // ProfilesLoadedMsg carries the fetched profile list.
 type ProfilesLoadedMsg struct {
-	List []profile.Meta
+	List []api.Meta
 	Err  error
 }
 

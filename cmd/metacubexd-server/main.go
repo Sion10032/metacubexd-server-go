@@ -28,14 +28,15 @@ import (
 	"syscall"
 	"time"
 
-	"metacubexd-server-go/internal/clashproxy"
-	"metacubexd-server-go/internal/config"
-	"metacubexd-server-go/internal/control"
-	authmw "metacubexd-server-go/internal/auth"
-	"metacubexd-server-go/internal/profile"
-	"metacubexd-server-go/internal/scheduler"
-	"metacubexd-server-go/internal/static"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
+	"metacubexd-server-go/internal/server/clashproxy"
+	"metacubexd-server-go/internal/server/config"
+	"metacubexd-server-go/internal/server/control"
+	authmw "metacubexd-server-go/internal/server/auth"
+	"metacubexd-server-go/internal/server/profile"
+	"metacubexd-server-go/internal/server/scheduler"
+	"metacubexd-server-go/internal/server/static"
+	"metacubexd-server-go/internal/server/supervisor"
 )
 
 // Populated via -ldflags at build time.
@@ -157,7 +158,7 @@ func main() {
 	// (which re-injects external-controller/secret) is reflected immediately.
 	mux.Handle("/api/clash/", clashproxy.New(func() (upstream, secret string, running bool) {
 		st := sup.State()
-		return st.ExternalController, st.Secret, st.Status == supervisor.StatusRunning
+		return st.ExternalController, st.Secret, st.Status == api.StatusRunning
 	}))
 
 	// Static UI. SameOriginClashPath makes /config.js emit
@@ -266,7 +267,7 @@ Configuration is via environment variables; see README.md § 配置 > 环境变�
 }
 
 // formatKernelState renders a one-line summary for the boot log.
-func formatKernelState(st supervisor.KernelState) string {
+func formatKernelState(st api.KernelState) string {
 	if st.PID != nil {
 		return fmt.Sprintf("%s (pid %d)", st.Status, *st.PID)
 	}

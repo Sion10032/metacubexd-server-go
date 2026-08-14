@@ -14,7 +14,7 @@ import (
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui/components"
 	"metacubexd-server-go/internal/ctl/tui/shared"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
 )
 
 // Model owns the Config tab state: the kernel operation menu, the editable
@@ -40,7 +40,7 @@ type Model struct {
 
 	// state/err mirror the root's globals so the tab body can render the
 	// status line; the root refreshes them before every render.
-	state *supervisor.KernelState
+	state *api.KernelState
 	err   error
 
 	width  int
@@ -88,7 +88,7 @@ func (m *Model) SetSize(width, height int) {
 // SetStatus refreshes the kernel state and status-bar error the tab body
 // renders at its top. The root owns these globals and pushes them here before
 // every render.
-func (m *Model) SetStatus(state *supervisor.KernelState, err error) {
+func (m *Model) SetStatus(state *api.KernelState, err error) {
 	m.state = state
 	m.err = err
 }

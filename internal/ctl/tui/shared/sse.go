@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"metacubexd-server-go/internal/ctl"
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
 )
 
 // Subscribe opens the SSE log subscription and hands the stream to the model
@@ -52,13 +52,13 @@ func ParseLogEvent(ev ctl.Event) tea.Msg {
 	}
 	switch header.Type {
 	case "log":
-		var l supervisor.KernelLogLine
+		var l api.KernelLogLine
 		if err := json.Unmarshal([]byte(ev.Data), &l); err != nil {
 			return nil
 		}
 		return LogLineMsg{Line: FormatLogLine(l)}
 	case "state":
-		var st supervisor.KernelState
+		var st api.KernelState
 		if err := json.Unmarshal([]byte(ev.Data), &st); err != nil {
 			return nil
 		}
@@ -68,7 +68,7 @@ func ParseLogEvent(ev ctl.Event) tea.Msg {
 }
 
 // FormatLogLine renders a kernel log line as "2006-01-02 15:04:05 LEVEL  line".
-func FormatLogLine(l supervisor.KernelLogLine) string {
+func FormatLogLine(l api.KernelLogLine) string {
 	level := "INFO "
 	if l.Stream == "stderr" {
 		level = ErrorStyle.Render("ERROR")

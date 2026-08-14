@@ -14,7 +14,7 @@ import (
 	"metacubexd-server-go/internal/ctl"
 	"metacubexd-server-go/internal/ctl/tui/components"
 	"metacubexd-server-go/internal/ctl/tui/shared"
-	"metacubexd-server-go/internal/profile"
+	"metacubexd-server-go/internal/api"
 )
 
 // Model renders the profile list as a table. The active profile is marked
@@ -23,7 +23,7 @@ import (
 // and the delete confirmation are inline states owned by this page.
 type Model struct {
 	table      table.Model
-	profiles   []profile.Meta
+	profiles   []api.Meta
 	activeID   string
 	importing  bool
 	form       components.Form
@@ -79,7 +79,7 @@ func (m *Model) SetSize(width, height int) {
 }
 
 // SetProfiles rebuilds the table rows from a profile list.
-func (m *Model) SetProfiles(list []profile.Meta, activeID string) {
+func (m *Model) SetProfiles(list []api.Meta, activeID string) {
 	m.profiles = list
 	m.activeID = activeID
 	rows := make([]table.Row, 0, len(list))

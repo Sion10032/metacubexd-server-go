@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"metacubexd-server-go/internal/supervisor"
+	"metacubexd-server-go/internal/api"
 )
 
 // mustDo performs a request via the client and fails the test on error. The
@@ -106,8 +106,8 @@ func TestKernelStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("KernelStatus: %v", err)
 	}
-	if st.Status != supervisor.StatusRunning {
-		t.Errorf("Status = %q, want %q", st.Status, supervisor.StatusRunning)
+	if st.Status != api.StatusRunning {
+		t.Errorf("Status = %q, want %q", st.Status, api.StatusRunning)
 	}
 	if st.PID == nil || *st.PID != 12345 {
 		t.Errorf("PID = %v, want 12345", st.PID)
@@ -125,14 +125,14 @@ func TestKernelStatus(t *testing.T) {
 func TestKernelOps(t *testing.T) {
 	ops := []struct {
 		name string
-		call func(*Client) (supervisor.KernelState, error)
+		call func(*Client) (api.KernelState, error)
 		path string
 	}{
-		{"start", func(c *Client) (supervisor.KernelState, error) { return c.KernelStart() }, "/api/control/kernel/start"},
-		{"stop", func(c *Client) (supervisor.KernelState, error) { return c.KernelStop() }, "/api/control/kernel/stop"},
-		{"restart", func(c *Client) (supervisor.KernelState, error) { return c.KernelRestart() }, "/api/control/kernel/restart"},
-		{"rollback", func(c *Client) (supervisor.KernelState, error) { return c.KernelRollback() }, "/api/control/kernel/rollback"},
-		{"recover", func(c *Client) (supervisor.KernelState, error) { return c.KernelRecover() }, "/api/control/kernel/recover"},
+		{"start", func(c *Client) (api.KernelState, error) { return c.KernelStart() }, "/api/control/kernel/start"},
+		{"stop", func(c *Client) (api.KernelState, error) { return c.KernelStop() }, "/api/control/kernel/stop"},
+		{"restart", func(c *Client) (api.KernelState, error) { return c.KernelRestart() }, "/api/control/kernel/restart"},
+		{"rollback", func(c *Client) (api.KernelState, error) { return c.KernelRollback() }, "/api/control/kernel/rollback"},
+		{"recover", func(c *Client) (api.KernelState, error) { return c.KernelRecover() }, "/api/control/kernel/recover"},
 	}
 
 	for _, op := range ops {
@@ -151,8 +151,8 @@ func TestKernelOps(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: %v", op.name, err)
 			}
-			if st.Status != supervisor.StatusStopped {
-				t.Errorf("Status = %q, want %q", st.Status, supervisor.StatusStopped)
+			if st.Status != api.StatusStopped {
+				t.Errorf("Status = %q, want %q", st.Status, api.StatusStopped)
 			}
 		})
 

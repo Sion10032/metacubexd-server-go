@@ -30,7 +30,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"metacubexd-server-go/internal/api"
-	"metacubexd-server-go/internal/merge"
+	"metacubexd-server-go/internal/server/merge"
 )
 
 // Profile types. Strings match the TS ProfileType union so the dashboard's

@@ -11,7 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	authmw "metacubexd-server-go/internal/auth"
+	authmw "metacubexd-server-go/internal/server/auth"
 )
 
 // mockMihomo starts a test HTTP server that mimics mihomo's Clash API.
