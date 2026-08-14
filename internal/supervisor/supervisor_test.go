@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"metacubexd-server-go/internal/api"
 )
 
 var fakeMihomoPath string
@@ -94,8 +96,8 @@ func TestStartStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if state.Status != StatusRunning {
-		t.Errorf("status = %q, want %q", state.Status, StatusRunning)
+	if state.Status != api.StatusRunning {
+		t.Errorf("status = %q, want %q", state.Status, api.StatusRunning)
 	}
 	if state.Version != "test-v1.0.0" {
 		t.Errorf("version = %q, want test-v1.0.0", state.Version)
@@ -104,8 +106,8 @@ func TestStartStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if state.Status != StatusStopped {
-		t.Errorf("status after Stop = %q, want %q", state.Status, StatusStopped)
+	if state.Status != api.StatusStopped {
+		t.Errorf("status after Stop = %q, want %q", state.Status, api.StatusStopped)
 	}
 }
 
@@ -139,8 +141,8 @@ func TestStopIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Stop: %v", err)
 	}
-	if state.Status != StatusStopped {
-		t.Errorf("status = %q, want %q", state.Status, StatusStopped)
+	if state.Status != api.StatusStopped {
+		t.Errorf("status = %q, want %q", state.Status, api.StatusStopped)
 	}
 }
 
@@ -157,8 +159,8 @@ func TestRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
-	if state.Status != StatusRunning {
-		t.Errorf("status after Restart = %q, want %q", state.Status, StatusRunning)
+	if state.Status != api.StatusRunning {
+		t.Errorf("status after Restart = %q, want %q", state.Status, api.StatusRunning)
 	}
 	if state.PID == nil {
 		t.Fatal("PID nil after Restart")
@@ -211,7 +213,7 @@ func TestAutoRestart(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		st := sup.State()
-		if st.Status == StatusRunning && st.PID != nil && *st.PID != *firstPID {
+		if st.Status == api.StatusRunning && st.PID != nil && *st.PID != *firstPID {
 			t.Logf("auto-restarted: old=%d new=%d", *firstPID, *st.PID)
 			return
 		}
@@ -248,7 +250,7 @@ func TestMaxRestarts(t *testing.T) {
 	// After exceeding MaxRestarts, status should be errored.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if sup.State().Status == StatusErrored {
+		if sup.State().Status == api.StatusErrored {
 			t.Logf("correctly reached errored after max restarts")
 			return
 		}
@@ -273,7 +275,7 @@ func TestStableReset(t *testing.T) {
 	killProc(t, *st.PID)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if sup.State().Status == StatusRunning {
+		if sup.State().Status == api.StatusRunning {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -291,13 +293,13 @@ func TestStableReset(t *testing.T) {
 		killProc(t, *st.PID)
 		deadline = time.Now().Add(3 * time.Second)
 		for time.Now().Before(deadline) {
-			if sup.State().Status == StatusRunning {
+			if sup.State().Status == api.StatusRunning {
 				break
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
-	if sup.State().Status != StatusRunning {
+	if sup.State().Status != api.StatusRunning {
 		t.Errorf("expected running after stable reset, got %q", sup.State().Status)
 	}
 }

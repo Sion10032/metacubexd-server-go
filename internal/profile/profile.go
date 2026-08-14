@@ -29,6 +29,7 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 
+	"metacubexd-server-go/internal/api"
 	"metacubexd-server-go/internal/merge"
 )
 
@@ -57,32 +58,7 @@ const DefaultUA = "clash.meta"
 // defaultSubscriptionTimeout caps subscription fetch/refresh network I/O.
 const defaultSubscriptionTimeout = 30 * time.Second
 
-// Meta is the profile metadata persisted in index.json. JSON tags mirror the
-// TS ProfileMeta interface field-for-field (including optionals) so the
-// dashboard's Pinia store decodes the list without remapping.
-type Meta struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Type             string            `json:"type"`
-	Enabled          *bool             `json:"enabled,omitempty"`
-	URL              string            `json:"url,omitempty"`
-	UserAgent        string            `json:"userAgent,omitempty"`
-	UpdateInterval   *int              `json:"updateInterval,omitempty"`
-	BaseProfileID    string            `json:"baseProfileId,omitempty"`
-	ManagedBy        string            `json:"managedBy,omitempty"`
-	EditorStatus     string            `json:"editorStatus,omitempty"`
-	UpdatedAt        int64             `json:"updatedAt"`
-	SubscriptionInfo *SubscriptionInfo `json:"subscriptionInfo,omitempty"`
-}
 
-// SubscriptionInfo is the parsed Subscription-Userinfo response header
-// (upload/download/total/expire, all in bytes / unix timestamp).
-type SubscriptionInfo struct {
-	Upload   int64 `json:"upload"`
-	Download int64 `json:"download"`
-	Total    int64 `json:"total"`
-	Expire   int64 `json:"expire"`
-}
 
 // CreateInput is the body of POST /profiles.
 type CreateInput struct {
@@ -126,7 +102,7 @@ func (e *SubscriptionFetchError) Error() string {
 
 // Fetcher abstracts subscription HTTP GETs (test double hook).
 type Fetcher interface {
-	Fetch(ctx context.Context, url, userAgent string) (body string, subInfo *SubscriptionInfo, err error)
+	Fetch(ctx context.Context, url, userAgent string) (body string, subInfo *api.SubscriptionInfo, err error)
 }
 
 // Store is the concurrent-safe ProfileStore. All public methods are serialized
@@ -171,15 +147,15 @@ func New(opts Options) *Store {
 }
 
 // List returns all profile metas in index order.
-func (s *Store) List() []Meta {
+func (s *Store) List() []api.Meta {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	idx, _ := s.readIndexLocked()
 	// Return a copy so callers cannot mutate the on-disk representation via the
-	// returned slice header. Element copies are value types (Meta has only
+	// returned slice header. Element copies are value types (api.Meta has only
 	// value-type fields except pointers, which we clone shallowly — profiles
 	// don't mutate them post-read).
-	out := make([]Meta, len(idx))
+	out := make([]api.Meta, len(idx))
 	copy(out, idx)
 	return out
 }
@@ -202,12 +178,12 @@ func (s *Store) Read(id string) (string, error) {
 //
 // type == "script" returns ErrScriptNotSupported (砍项 — the UI's "new script"
 // button surfaces this as a 501 toast).
-func (s *Store) Create(in CreateInput) (Meta, error) {
+func (s *Store) Create(in CreateInput) (api.Meta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	current, _ := s.readIndexLocked()
 
@@ -218,23 +194,23 @@ func (s *Store) Create(in CreateInput) (Meta, error) {
 	// Script砍法 (create path): refuse outright so users can't accumulate
 	// unservable script profiles.
 	if t == TypeScript {
-		return Meta{}, ErrScriptNotSupported
+		return api.Meta{}, ErrScriptNotSupported
 	}
 	// Validate visual-editor overlays the same way as the TS server so a
 	// migrated UI can't get into an inconsistent state.
 	if in.ManagedBy == ManagedByVisualEditor {
 		if t != TypeMerge || in.BaseProfileID == "" {
-			return Meta{}, errors.New("visual editor overlays must be scoped merge profiles")
+			return api.Meta{}, errors.New("visual editor overlays must be scoped merge profiles")
 		}
 		for _, m := range current {
 			if m.ManagedBy == ManagedByVisualEditor && m.BaseProfileID == in.BaseProfileID {
-				return Meta{}, fmt.Errorf("visual editor overlay already exists for %s", in.BaseProfileID)
+				return api.Meta{}, fmt.Errorf("visual editor overlay already exists for %s", in.BaseProfileID)
 			}
 		}
 	}
 
 	id := s.idGen()
-	m := Meta{
+	m := api.Meta{
 		ID:            id,
 		Name:          in.Name,
 		Type:          t,
@@ -244,19 +220,19 @@ func (s *Store) Create(in CreateInput) (Meta, error) {
 		UpdatedAt:     s.now(),
 	}
 	if err := s.atomicWrite(s.profilePath(id), in.Content); err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	// Append to the index AFTER the file is durable; if writeIndex fails we
 	// clean up the orphaned file so a retry doesn't accumulate garbage.
 	if err := s.writeIndexLocked(append(current, m)); err != nil {
 		_ = os.Remove(s.profilePath(id))
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	return m, nil
 }
 
 // Update patches a profile's meta and optionally rewrites its content.
-func (s *Store) Update(id string, in UpdateInput) (Meta, error) {
+func (s *Store) Update(id string, in UpdateInput) (api.Meta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -269,13 +245,13 @@ func (s *Store) Update(id string, in UpdateInput) (Meta, error) {
 		}
 	}
 	if pos == -1 {
-		return Meta{}, ErrNotFound
+		return api.Meta{}, ErrNotFound
 	}
 	m := idx[pos]
 
 	if in.Content != nil {
 		if err := s.atomicWrite(s.profilePath(id), *in.Content); err != nil {
-			return Meta{}, err
+			return api.Meta{}, err
 		}
 	}
 	if in.Name != nil {
@@ -303,7 +279,7 @@ func (s *Store) Update(id string, in UpdateInput) (Meta, error) {
 	}
 	idx[pos] = m
 	if err := s.writeIndexLocked(idx); err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	return m, nil
 }
@@ -345,7 +321,7 @@ func (s *Store) Delete(id string) error {
 		}
 	}
 	// retained aliases idx's backing array; copy out before mutation.
-	clean := make([]Meta, len(retained))
+	clean := make([]api.Meta, len(retained))
 	copy(clean, retained)
 
 	// If we just deleted a visual-editor overlay, mark its base as clean —
@@ -373,52 +349,52 @@ func (s *Store) Delete(id string) error {
 // Duplicate copies a profile's content to a new local profile. The copy is
 // always type=local (matches TS) — duplicating a remote subscription would
 // suggest it auto-refreshes, but it has no URL.
-func (s *Store) Duplicate(id, name string) (Meta, error) {
+func (s *Store) Duplicate(id, name string) (api.Meta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	src, err := s.findMetaLocked(id)
 	if err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	content, err := os.ReadFile(s.profilePath(id))
 	if err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	n := name
 	if n == "" {
 		n = src.Name + " copy"
 	}
 	newID := s.idGen()
-	m := Meta{
+	m := api.Meta{
 		ID:        newID,
 		Name:      n,
 		Type:      TypeLocal,
 		UpdatedAt: s.now(),
 	}
 	if err := s.atomicWrite(s.profilePath(newID), string(content)); err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	idx, _ := s.readIndexLocked()
 	if err := s.writeIndexLocked(append(idx, m)); err != nil {
 		_ = os.Remove(s.profilePath(newID))
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	return m, nil
 }
 
 // ImportFromURL fetches a remote subscription (UA: clash.meta) and stores it
 // as a new remote profile, parsing Subscription-Userinfo if present.
-func (s *Store) ImportFromURL(urlStr, name string) (Meta, error) {
+func (s *Store) ImportFromURL(urlStr, name string) (api.Meta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	body, subInfo, err := s.fetcher.Fetch(context.Background(), urlStr, DefaultUA)
 	if err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 
 	n := name
@@ -426,7 +402,7 @@ func (s *Store) ImportFromURL(urlStr, name string) (Meta, error) {
 		n = urlStr
 	}
 	id := s.idGen()
-	m := Meta{
+	m := api.Meta{
 		ID:               id,
 		Name:             n,
 		Type:             TypeRemote,
@@ -436,12 +412,12 @@ func (s *Store) ImportFromURL(urlStr, name string) (Meta, error) {
 		SubscriptionInfo: subInfo,
 	}
 	if err := s.atomicWrite(s.profilePath(id), body); err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	idx, _ := s.readIndexLocked()
 	if err := s.writeIndexLocked(append(idx, m)); err != nil {
 		_ = os.Remove(s.profilePath(id))
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	return m, nil
 }
@@ -449,7 +425,7 @@ func (s *Store) ImportFromURL(urlStr, name string) (Meta, error) {
 // Refresh re-fetches a remote subscription in place (same id). A successful
 // refresh also re-composes to detect visual-editor conflicts; the meta is
 // marked clean/conflicted accordingly.
-func (s *Store) Refresh(id string) (Meta, error) {
+func (s *Store) Refresh(id string) (api.Meta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -462,11 +438,11 @@ func (s *Store) Refresh(id string) (Meta, error) {
 		}
 	}
 	if pos == -1 {
-		return Meta{}, ErrNotFound
+		return api.Meta{}, ErrNotFound
 	}
 	m := idx[pos]
 	if m.Type != TypeRemote || m.URL == "" {
-		return Meta{}, ErrNotRemote
+		return api.Meta{}, ErrNotRemote
 	}
 	ua := m.UserAgent
 	if ua == "" {
@@ -474,10 +450,10 @@ func (s *Store) Refresh(id string) (Meta, error) {
 	}
 	body, subInfo, err := s.fetcher.Fetch(context.Background(), m.URL, ua)
 	if err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	if err := s.atomicWrite(s.profilePath(id), body); err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	m.UpdatedAt = s.now()
 	if subInfo != nil {
@@ -495,7 +471,7 @@ func (s *Store) Refresh(id string) (Meta, error) {
 	}
 	idx[pos] = m
 	if err := s.writeIndexLocked(idx); err != nil {
-		return Meta{}, err
+		return api.Meta{}, err
 	}
 	return m, nil
 }
@@ -536,7 +512,7 @@ func (s *Store) SetActive(id string) error {
 // Compose materializes a profile + its enabled overlays into a single YAML
 // document. It does NOT touch active.yaml; callers that want persistence
 // should use SetActive.
-func (s *Store) Compose(id string) (string, []Meta, error) {
+func (s *Store) Compose(id string) (string, []api.Meta, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.composeLocked(id)
@@ -646,18 +622,18 @@ func (s *Store) profilePath(id string) string { return filepath.Join(s.dir, id+"
 func (s *Store) indexPath() string  { return filepath.Join(s.dir, "index.json") }
 func (s *Store) statePath() string  { return filepath.Join(s.dir, "state.json") }
 
-func (s *Store) findMetaLocked(id string) (Meta, error) {
+func (s *Store) findMetaLocked(id string) (api.Meta, error) {
 	idx, _ := s.readIndexLocked()
 	for _, m := range idx {
 		if m.ID == id {
 			return m, nil
 		}
 	}
-	return Meta{}, ErrNotFound
+	return api.Meta{}, ErrNotFound
 }
 
 // readIndexLocked reads index.json. Missing file → empty list (first run).
-func (s *Store) readIndexLocked() ([]Meta, error) {
+func (s *Store) readIndexLocked() ([]api.Meta, error) {
 	b, err := os.ReadFile(s.indexPath())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -665,14 +641,14 @@ func (s *Store) readIndexLocked() ([]Meta, error) {
 	if err != nil {
 		return nil, err
 	}
-	var idx []Meta
+	var idx []api.Meta
 	if err := jsonUnmarshal(b, &idx); err != nil {
 		return nil, err
 	}
 	return idx, nil
 }
 
-func (s *Store) writeIndexLocked(idx []Meta) error {
+func (s *Store) writeIndexLocked(idx []api.Meta) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
 	}
@@ -715,7 +691,7 @@ func (s *Store) writeStateLocked(st stateFile) error {
 //     global); script overlays are silently skipped (砍项)
 //   - no overlays → emit base verbatim (preserve formatting byte-for-byte)
 //   - else → deep-merge
-func (s *Store) composeLocked(id string) (string, []Meta, error) {
+func (s *Store) composeLocked(id string) (string, []api.Meta, error) {
 	base, err := s.findMetaLocked(id)
 	if err != nil {
 		return "", nil, err
@@ -744,7 +720,7 @@ func (s *Store) composeLocked(id string) (string, []Meta, error) {
 	}
 
 	var overlays []string
-	var composition []Meta
+	var composition []api.Meta
 	for _, m := range idx {
 		// undefined enabled == on (overlay applies). Only explicit `false`
 		// disables it.
@@ -861,7 +837,7 @@ type httpFetcher struct {
 	client  *http.Client
 }
 
-func (f *httpFetcher) Fetch(ctx context.Context, urlStr, userAgent string) (string, *SubscriptionInfo, error) {
+func (f *httpFetcher) Fetch(ctx context.Context, urlStr, userAgent string) (string, *api.SubscriptionInfo, error) {
 	if f.client == nil {
 		f.client = &http.Client{Timeout: f.timeout}
 	}
@@ -897,11 +873,11 @@ func (f *httpFetcher) Fetch(ctx context.Context, urlStr, userAgent string) (stri
 // semicolon-separated key=value list: `upload=...; download=...; total=...;
 // expire=...`. Missing keys default to 0; a header with none of the known keys
 // returns nil (so the meta omits the field).
-func parseSubscriptionUserinfo(header string) *SubscriptionInfo {
+func parseSubscriptionUserinfo(header string) *api.SubscriptionInfo {
 	if header == "" {
 		return nil
 	}
-	var info SubscriptionInfo
+	var info api.SubscriptionInfo
 	seen := false
 	for _, part := range strings.Split(header, ";") {
 		kv := strings.SplitN(part, "=", 2)

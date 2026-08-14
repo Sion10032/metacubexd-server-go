@@ -24,47 +24,16 @@ import (
 	"syscall"
 	"time"
 
+	"metacubexd-server-go/internal/api"
+
 	"gopkg.in/yaml.v3"
 )
-
-// KernelStatus mirrors the TS KernelStatus union. JSON-marshals as a string so
-// the UI's endpoint store decodes it without any custom logic.
-type KernelStatus string
-
-const (
-	StatusStopped  KernelStatus = "stopped"
-	StatusStarting KernelStatus = "starting"
-	StatusRunning  KernelStatus = "running"
-	StatusStopping KernelStatus = "stopping"
-	StatusErrored  KernelStatus = "errored"
-)
-
-// KernelState is the JSON shape served by GET /api/control/kernel/status. It
-// matches the TS KernelState interface field-for-field so the dashboard's
-// endpoint store reads it without translation.
-type KernelState struct {
-	Status             KernelStatus `json:"status"`
-	PID                *int         `json:"pid,omitempty"`
-	StartedAt          *int64       `json:"startedAt,omitempty"`
-	Version            string       `json:"version,omitempty"`
-	ExternalController string       `json:"externalController"`
-	Secret             string       `json:"secret"`
-	LastExitCode       *int         `json:"lastExitCode,omitempty"`
-	LastError          string       `json:"lastError,omitempty"`
-}
-
-// KernelLogLine is one line emitted by mihomo on stdout/stderr.
-type KernelLogLine struct {
-	Stream string `json:"stream"` // "stdout" | "stderr"
-	Line   string `json:"line"`
-	TS     int64  `json:"ts"`
-}
 
 // LogCallback / StateCallback are invoked on each log line / state transition.
 // OnLog returns an ID to pass to OffLog; the same pattern applies to OnState.
 // Callbacks must not block — they run under the supervisor mutex.
-type LogCallback func(line KernelLogLine)
-type StateCallback func(state KernelState)
+type LogCallback func(line api.KernelLogLine)
+type StateCallback func(state api.KernelState)
 
 // Options configures a Supervisor. ExternalController/Secret default to
 // "127.0.0.1:9090" / random hex when empty; callers from the server layer
@@ -108,7 +77,7 @@ type Supervisor struct {
 	binaryPath string
 
 	mu       sync.Mutex // protects state, child, callbacks, flags, timers
-	state    KernelState
+	state    api.KernelState
 	child    *childProc
 	intentionalStop bool
 
@@ -172,8 +141,8 @@ func New(opts Options) *Supervisor {
 	return &Supervisor{
 		opts:      opts,
 		binaryPath: opts.BinaryPath,
-		state: KernelState{
-			Status:             StatusStopped,
+		state: api.KernelState{
+			Status:             api.StatusStopped,
 			ExternalController: ec,
 			Secret:             secret,
 		},
@@ -183,7 +152,7 @@ func New(opts Options) *Supervisor {
 }
 
 // State returns a snapshot of the current kernel state. Safe for concurrent use.
-func (s *Supervisor) State() KernelState {
+func (s *Supervisor) State() api.KernelState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.state
@@ -199,12 +168,12 @@ func (s *Supervisor) SetBinaryPath(path string) {
 
 // Start spawns the kernel (or returns the current state if already up). It is
 // serialized with Stop/Restart via lifeMu.
-func (s *Supervisor) Start() (KernelState, error) {
+func (s *Supervisor) Start() (api.KernelState, error) {
 	s.lifeMu.Lock()
 	defer s.lifeMu.Unlock()
 
 	s.mu.Lock()
-	if s.state.Status == StatusRunning || s.state.Status == StatusStarting {
+	if s.state.Status == api.StatusRunning || s.state.Status == api.StatusStarting {
 		st := s.state
 		s.mu.Unlock()
 		return st, nil
@@ -215,7 +184,7 @@ func (s *Supervisor) Start() (KernelState, error) {
 }
 
 // Stop terminates the kernel: SIGTERM, wait StopTimeout, then SIGKILL.
-func (s *Supervisor) Stop() (KernelState, error) {
+func (s *Supervisor) Stop() (api.KernelState, error) {
 	s.lifeMu.Lock()
 	defer s.lifeMu.Unlock()
 
@@ -226,13 +195,13 @@ func (s *Supervisor) Stop() (KernelState, error) {
 	s.cancelStabilityResetLocked()
 	c := s.child
 	if c == nil {
-		s.state.Status = StatusStopped
+		s.state.Status = api.StatusStopped
 		s.state.PID = nil
 		snapshot := s.snapshotLocked()
 		s.mu.Unlock()
 		return snapshot, nil
 	}
-	s.state.Status = StatusStopping
+	s.state.Status = api.StatusStopping
 	snapshot := s.snapshotLocked()
 	s.mu.Unlock()
 
@@ -251,7 +220,7 @@ func (s *Supervisor) Stop() (KernelState, error) {
 
 	s.mu.Lock()
 	s.child = nil
-	s.state.Status = StatusStopped
+	s.state.Status = api.StatusStopped
 	s.state.PID = nil
 	snapshot = s.snapshotLocked()
 	s.mu.Unlock()
@@ -259,7 +228,7 @@ func (s *Supervisor) Stop() (KernelState, error) {
 }
 
 // Restart is Stop followed by Start, both under lifeMu.
-func (s *Supervisor) Restart() (KernelState, error) {
+func (s *Supervisor) Restart() (api.KernelState, error) {
 	s.lifeMu.Lock()
 	defer s.lifeMu.Unlock()
 
@@ -322,12 +291,12 @@ func (s *Supervisor) OffState(id int) {
 // --- internals ---
 
 // doStart assumes lifeMu is held.
-func (s *Supervisor) doStart() (KernelState, error) {
+func (s *Supervisor) doStart() (api.KernelState, error) {
 	s.mu.Lock()
 	// A (re)start clears the intentional-stop flag so a later crash is detectable.
 	s.intentionalStop = false
-	s.state = KernelState{
-		Status:             StatusStarting,
+	s.state = api.KernelState{
+		Status:             api.StatusStarting,
 		ExternalController: s.opts.ExternalController,
 		Secret:             s.opts.Secret,
 	}
@@ -378,8 +347,8 @@ func (s *Supervisor) doStart() (KernelState, error) {
 	s.mu.Lock()
 	if !ready {
 		// If the proc already exited and watchExit marked it errored, keep that.
-		if s.state.Status != StatusErrored {
-			s.state.Status = StatusErrored
+		if s.state.Status != api.StatusErrored {
+			s.state.Status = api.StatusErrored
 			s.state.LastError = "ready timeout"
 			snapshot = s.snapshotLocked()
 			s.broadcastStateLocked(snapshot)
@@ -398,9 +367,9 @@ func (s *Supervisor) doStart() (KernelState, error) {
 }
 
 // failStart transitions to errored and returns the snapshot + error.
-func (s *Supervisor) failStart(msg string) (KernelState, error) {
+func (s *Supervisor) failStart(msg string) (api.KernelState, error) {
 	s.mu.Lock()
-	s.state.Status = StatusErrored
+	s.state.Status = api.StatusErrored
 	s.state.LastError = msg
 	snapshot := s.snapshotLocked()
 	s.broadcastStateLocked(snapshot)
@@ -410,7 +379,7 @@ func (s *Supervisor) failStart(msg string) (KernelState, error) {
 
 // doStop assumes lifeMu is held. Separate from Stop so Restart can call it
 // without re-acquiring lifeMu.
-func (s *Supervisor) doStop() (KernelState, error) {
+func (s *Supervisor) doStop() (api.KernelState, error) {
 	s.mu.Lock()
 	// Mark user-initiated so the proc 'exit' handler does not auto-restart,
 	// and cancel any pending backoff restart a prior crash may have armed.
@@ -420,13 +389,13 @@ func (s *Supervisor) doStop() (KernelState, error) {
 	s.cancelStabilityResetLocked()
 	c := s.child
 	if c == nil {
-		s.state.Status = StatusStopped
+		s.state.Status = api.StatusStopped
 		s.state.PID = nil
 		snapshot := s.snapshotLocked()
 		s.mu.Unlock()
 		return snapshot, nil
 	}
-	s.state.Status = StatusStopping
+	s.state.Status = api.StatusStopping
 	snapshot := s.snapshotLocked()
 	s.mu.Unlock()
 
@@ -442,7 +411,7 @@ func (s *Supervisor) doStop() (KernelState, error) {
 
 	s.mu.Lock()
 	s.child = nil
-	s.state.Status = StatusStopped
+	s.state.Status = api.StatusStopped
 	s.state.PID = nil
 	snapshot = s.snapshotLocked()
 	s.mu.Unlock()
@@ -476,23 +445,23 @@ func (s *Supervisor) watchExit(c *childProc) {
 	// This run is over: any stability timer armed for it must not fire later.
 	s.cancelStabilityResetLocked()
 
-	wasActive := s.state.Status == StatusStarting ||
-		s.state.Status == StatusRunning ||
-		s.state.Status == StatusStopping
+	wasActive := s.state.Status == api.StatusStarting ||
+		s.state.Status == api.StatusRunning ||
+		s.state.Status == api.StatusStopping
 	if wasActive {
 		if s.intentionalStop {
 			// User-initiated stop/restart: clean transition to stopped, no retry.
-			s.state.Status = StatusStopped
+			s.state.Status = api.StatusStopped
 		} else {
 			// Unexpected crash: mark errored, then maybe arm the watchdog.
-			s.state.Status = StatusErrored
+			s.state.Status = api.StatusErrored
 			if s.opts.AutoRestart && s.restartCount < s.opts.MaxRestarts {
 				s.restartCount++
 				needRestart = true
 			}
 		}
 	} else {
-		s.state.Status = StatusStopped
+		s.state.Status = api.StatusStopped
 	}
 	s.state.LastExitCode = exitCode
 	s.state.PID = nil
@@ -518,7 +487,7 @@ func (s *Supervisor) readStream(r io.Reader, stream string) {
 			// the TS split('\n') which yields lines without the separator.
 			line = strings.TrimRight(line, "\n")
 			if line != "" {
-				ln := KernelLogLine{Stream: stream, Line: line, TS: time.Now().UnixMilli()}
+				ln := api.KernelLogLine{Stream: stream, Line: line, TS: time.Now().UnixMilli()}
 				s.mu.Lock()
 				for _, cb := range s.logCbs {
 					cb(ln)
@@ -542,7 +511,7 @@ func (s *Supervisor) pollReady(deadline time.Time) bool {
 		ec := s.state.ExternalController
 		secret := s.state.Secret
 		s.mu.Unlock()
-		if status == StatusErrored {
+		if status == api.StatusErrored {
 			return false
 		}
 
@@ -560,7 +529,7 @@ func (s *Supervisor) pollReady(deadline time.Time) bool {
 					_ = json.NewDecoder(resp.Body).Decode(&body)
 					_ = resp.Body.Close()
 					s.mu.Lock()
-					s.state.Status = StatusRunning
+					s.state.Status = api.StatusRunning
 					if body.Version != "" {
 						s.state.Version = body.Version
 					}
@@ -683,14 +652,14 @@ func shouldStripTopLevelKey(line string, mixedPort int, hasMixed bool) bool {
 }
 
 // snapshotLocked returns a state copy. Caller must hold s.mu.
-func (s *Supervisor) snapshotLocked() KernelState {
+func (s *Supervisor) snapshotLocked() api.KernelState {
 	return s.state
 }
 
 // broadcastStateLocked invokes every state callback. Caller must hold s.mu.
 // Callbacks run inline; keep them cheap (the SSE handler just writes to a
 // channel).
-func (s *Supervisor) broadcastStateLocked(snapshot KernelState) {
+func (s *Supervisor) broadcastStateLocked(snapshot api.KernelState) {
 	for _, cb := range s.stateCbs {
 		cb(snapshot)
 	}
@@ -763,7 +732,7 @@ func (s *Supervisor) armStabilityReset() {
 	s.stableTimer = time.AfterFunc(s.opts.StableRestart, func() {
 		s.mu.Lock()
 		s.stableTimer = nil
-		if s.state.Status == StatusRunning {
+		if s.state.Status == api.StatusRunning {
 			s.restartCount = 0
 		}
 		s.mu.Unlock()
