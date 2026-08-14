@@ -2,11 +2,11 @@ package kernel
 
 import (
 	"fmt"
-
-	"gopkg.in/yaml.v3"
 )
 
 // NetworkSettings holds the editable network fields of the active config.
+// Values is sourced from mihomo's live /configs endpoint (GET
+// /api/clash/configs), so it reflects the kernel's actual runtime state.
 type NetworkSettings struct {
 	Values map[string]any // top-level keys: mixed-port, port, socks-port, tun
 	Loaded bool
@@ -74,20 +74,14 @@ func fmtValue(v any) string {
 	return fmt.Sprint(v)
 }
 
-// parseNetworkSettings extracts the editable network fields from a YAML config
-// body.
-func parseNetworkSettings(content string) NetworkSettings {
+// networkSettingsFrom extracts the editable network fields from the JSON
+// object returned by mihomo's /configs endpoint. The native Go types match
+// a YAML parse (number→float64, bool→bool, string→string), so valueOf /
+// setField are unaffected by the switch from the on-disk YAML to the live API.
+func networkSettingsFrom(values map[string]any) NetworkSettings {
 	ns := NetworkSettings{Values: map[string]any{}}
-	var v any
-	if err := yaml.Unmarshal([]byte(content), &v); err != nil {
-		return ns
-	}
-	top, ok := v.(map[string]any)
-	if !ok {
-		return ns
-	}
 	for _, key := range []string{"mixed-port", "port", "socks-port", "tun"} {
-		if val, ok := top[key]; ok && val != nil {
+		if val, ok := values[key]; ok && val != nil {
 			ns.Values[key] = val
 		}
 	}
